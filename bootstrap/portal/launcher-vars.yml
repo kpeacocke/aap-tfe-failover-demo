@@ -1,0 +1,20 @@
+---
+aap_configuration_secure_logging: true
+controller_credentials:
+  - name: Demo | Portal Workflow Runner
+    organization: "{{ demo_portal_organization }}"
+    credential_type: Red Hat Ansible Automation Platform
+    description: Demo-managed execute-only workflow identity; never an administrator credential.
+    update_secrets: false
+    inputs:
+      host: "{{ aap_hostname }}"
+      oauth_token: >-
+        {{ demo_portal_runner_secret.resources[0].data.token | b64decode
+           if demo_portal_runner_secret.resources | length else demo_portal_runner_token.ansible_facts.aap_token.token }}
+      verify_ssl: true
+controller_templates: "{{ lookup('ansible.builtin.template', 'launchers.json.j2') | from_json }}"
+controller_roles:
+  - role: execute
+    teams: [Demo | Failover Operators]
+    job_templates: [Demo | Portal Failover, Demo | Portal Recovery]
+    lookup_organization: "{{ demo_portal_organization }}"

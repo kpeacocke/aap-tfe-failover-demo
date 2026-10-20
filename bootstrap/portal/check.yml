@@ -1,0 +1,70 @@
+---
+- name: Verify existing AAP before inspecting the Portal add-on
+  ansible.builtin.import_playbook: ../check-aap.yml
+
+- name: Detect Portal without changing the supplied cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  module_defaults:
+    group/kubernetes.core.k8s:
+      host: "{{ demo_portal_cluster_api }}"
+      api_key: "{{ demo_portal_cluster_token }}"
+      validate_certs: "{{ demo_portal_validate_certs }}"
+      ca_cert: "{{ demo_portal_ca_cert }}"
+  tasks:
+    - name: Inspect existing deployments across namespaces
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+      register: demo_portal_deployments
+
+    - name: Find Portal deployments by application image or name
+      ansible.builtin.set_fact:
+        demo_portal_existing: >-
+          {{ (demo_portal_existing | default([])) + [item.metadata.namespace ~ '/' ~ item.metadata.name] }}
+      loop: "{{ demo_portal_deployments.resources }}"
+      loop_control:
+        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+      when: >-
+        item.metadata.name is search('rhaap-portal|backstage|self-service|selfservice') or
+        item.spec.template.spec.containers | map(attribute='image') | join(' ') is search('rhdh-hub|automation-portal|backstage')
+
+    - name: Refuse to overwrite an unrelated existing Portal
+      ansible.builtin.assert:
+        that:
+          - demo_portal_existing | default([]) | reject('match', '^' ~ demo_portal_namespace ~ '/') | list | length == 0
+        fail_msg: >-
+          Existing Portal detected: {{ demo_portal_existing | default([]) }}.
+          Stop and select an explicit supported reuse configuration; unrelated Portal resources were not changed.
+
+    - name: Inspect the supplied OpenShift version and ingress domain
+      kubernetes.core.k8s_info:
+        api_version: config.openshift.io/v1
+        kind: "{{ item.kind }}"
+        name: "{{ item.name }}"
+      loop:
+        - {kind: ClusterVersion, name: version}
+        - {kind: Ingress, name: cluster}
+      register: demo_portal_cluster
+
+    - name: Require a supported existing OpenShift release
+      ansible.builtin.assert:
+        that:
+          - demo_portal_cluster.results[0].resources[0].status.desired.version is version('4.16', '>=')
+          - demo_portal_cluster.results[0].resources[0].status.desired.version is version('4.21', '<')
+        fail_msg: Portal 2.2 supports OpenShift 4.16-4.20. Never upgrade the supplied cluster through this project.
+
+    - name: Derive the demo-only Portal URL
+      ansible.builtin.set_fact:
+        demo_portal_domain: "{{ demo_portal_cluster.results[1].resources[0].spec.domain }}"
+        demo_portal_hostname: "ww-demo-portal.{{ demo_portal_cluster.results[1].resources[0].spec.domain }}"
+
+    - name: Report safe discovery metadata
+      ansible.builtin.debug:
+        msg:
+          existing: "{{ demo_portal_existing | default([]) }}"
+          portal_url: "https://{{ demo_portal_hostname }}"
+          chart_version: "{{ demo_portal_chart_version }}"

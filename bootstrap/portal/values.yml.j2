@@ -1,0 +1,48 @@
+redhat-developer-hub:
+  global:
+    clusterRouterBase: {{ demo_portal_domain | to_json }}
+    host: {{ demo_portal_hostname | to_json }}
+    pluginMode: oci
+    imageTagInfo: "2.2"
+  upstream:
+    commonLabels: {{ demo_portal_labels | to_json }}
+    backstage:
+      extraVolumes: {{ (demo_portal_chart_defaults['redhat-developer-hub'].upstream.backstage.extraVolumes + [{'name': 'ww-demo-rbac', 'configMap': {'name': 'ww-demo-portal-rbac'}}]) | to_json }}
+      extraVolumeMounts: {{ (demo_portal_chart_defaults['redhat-developer-hub'].upstream.backstage.extraVolumeMounts + [{'name': 'ww-demo-rbac', 'mountPath': '/opt/app-root/src/ww-demo-rbac', 'readOnly': true}]) | to_json }}
+      appConfig:
+        ansible:
+          rhaap:
+            checkSSL: true
+        auth:
+          providers:
+            rhaap:
+              production:
+                checkSSL: true
+        integrations:
+          github:
+            - host: github.com
+          gitlab: []
+        permission:
+          enabled: true
+          rbac:
+            policies-csv-file: /opt/app-root/src/ww-demo-rbac/policy.csv
+            policyFileReload: true
+        catalog:
+          locations:
+            - type: url
+              target: {{ (demo_portal_catalog_base ~ '/failover-template.yaml') | to_json }}
+              rules: [{allow: [Template]}]
+            - type: url
+              target: {{ (demo_portal_catalog_base ~ '/recovery-template.yaml') | to_json }}
+              rules: [{allow: [Template]}]
+          providers:
+            rhaap:
+              {% raw %}'{{- include "catalog.providers.env" . }}'{% endraw %}:
+                orgs: [{{ demo_portal_organization | to_json }}]
+                sync:
+                  orgsUsersTeams:
+                    schedule:
+                      frequency: {minutes: 1}
+                      timeout: {seconds: 50}
+                  jobTemplates:
+                    enabled: false

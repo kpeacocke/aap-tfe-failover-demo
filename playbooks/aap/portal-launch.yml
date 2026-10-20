@@ -1,0 +1,55 @@
+---
+- name: Launch only the fixed staged workflow using the execute-only demo identity
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require only the approved operational request
+      ansible.builtin.assert:
+        that:
+          - demo_portal_operation in ['failover', 'recovery']
+          - demo_service == 'Customer Orders Demo'
+          - demo_reference is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+          - demo_confirmation == 'CONFIRM'
+          - demo_target | default('') in ['dc1', 'dc2'] if demo_portal_operation == 'failover' else demo_recovery_dc | default('') in ['dc1', 'dc2']
+          - >-
+            demo_reason | default('') in ['Site failure', 'Planned maintenance', 'Network degradation', 'Disaster recovery test']
+            if demo_portal_operation == 'failover' else true
+        fail_msg: The Portal launcher accepts only approved service, datacentre, reason, reference and confirmation.
+
+    - name: Construct only allowlisted workflow survey variables
+      ansible.builtin.set_fact:
+        demo_portal_fields: >-
+          {{ {'demo_service': demo_service, 'demo_reference': demo_reference, 'demo_confirmation': demo_confirmation}
+             | combine({'demo_target': demo_target, 'demo_reason': demo_reason} if demo_portal_operation == 'failover'
+                       else {'demo_recovery_dc': demo_recovery_dc}) }}
+
+    - name: Execute and wait for the existing staged workflow
+      block:
+        - name: Launch the fixed workflow with the injected execute-only credential
+          ansible.controller.workflow_launch:
+            name: "{{ 'Demo - Datacentre Failover' if demo_portal_operation == 'failover' else 'Demo - Datacentre Recovery' }}"
+            organization: Demo | Datacentre Failover
+            extra_vars: "{{ demo_portal_fields }}"
+            wait: true
+            timeout: 3300
+          register: demo_portal_workflow
+          no_log: true
+      rescue:
+        - name: Report failed or unconfirmed execution without clearing operational locks
+          ansible.builtin.fail:
+            msg: >-
+              Portal workflow failed or was not confirmed (workflow {{ demo_portal_workflow.id | default('unknown') }}).
+              An administrator must inspect the real graph and evidence; quarantine and owned markers are never automatically cleared.
+
+    - name: Publish the real workflow identity for retained Portal job evidence
+      ansible.builtin.set_stats:
+        data:
+          demo_portal_workflow:
+            id: "{{ demo_portal_workflow.id }}"
+            status: "{{ demo_portal_workflow.status }}"
+            reference: "{{ demo_reference }}"
+
+    - name: Report the completed real workflow
+      ansible.builtin.debug:
+        msg: "AAP workflow {{ demo_portal_workflow.id }}: {{ demo_portal_workflow.status }} ({{ demo_reference }})"

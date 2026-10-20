@@ -1,0 +1,55 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: ww-demo-failover-custom
+  title: Datacentre Failover
+  description: Validate, quarantine and drain the source, activate the healthy target, and retain execution evidence.
+  annotations:
+    ansible.com/template-source: scm
+  tags: [demo-managed, datacentre]
+spec:
+  owner: user:default/ww-demo-operator
+  type: automation-template
+  parameters:
+    - title: Controlled datacentre failover
+      required: [target, reason, reference, confirmation]
+      properties:
+        target:
+          title: Target datacentre
+          type: string
+          enum: [dc1, dc2]
+        reason:
+          title: Reason
+          type: string
+          enum: [Site failure, Planned maintenance, Network degradation, Disaster recovery test]
+          default: Planned maintenance
+        reference:
+          title: Incident/change reference
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          minLength: 1
+          maxLength: 64
+        confirmation:
+          title: Confirm traffic move
+          description: Confirm that this request may change the active datacentre.
+          type: string
+          enum: [CONFIRM]
+  steps:
+    - id: execute
+      name: Execute the staged AAP failover workflow
+      action: rhaap:launch-job-template
+      input:
+        token: ${{ secrets.aapToken }}
+        values:
+          template: Demo | Portal Failover
+          extraVariables:
+            demo_service: Customer Orders Demo
+            demo_target: ${{ parameters.target }}
+            demo_reason: ${{ parameters.reason }}
+            demo_reference: ${{ parameters.reference }}
+            demo_confirmation: ${{ parameters.confirmation }}
+  output:
+    text:
+      - title: Completed staged failover
+        content: "Request ${{ parameters.reference }} completed. An administrator can inspect the retained AAP graph and evidence."

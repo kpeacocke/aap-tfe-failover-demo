@@ -1,0 +1,7 @@
+---
+- name: Load declarative launcher resources without touching workflow stages
+  ansible.builtin.include_vars: launcher-vars.yml
+
+- name: Reconcile only approved Portal bridge resources
+  ansible.builtin.include_role:
+    name: infra.aap_configuration.dispatch

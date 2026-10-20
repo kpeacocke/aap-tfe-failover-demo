@@ -14,6 +14,9 @@ case "${1:-}" in
     install) playbook=install-demo.yml ;;
     setup) playbook=setup-demo.yml ;;
     readiness) playbook=check-runtime.yml ;;
+    portal-check) playbook=portal/check.yml ;;
+    portal-install) playbook=portal/deploy.yml ;;
+    portal-verify) playbook=portal/verify.yml ;;
     failover|recovery)
         if [[ "$#" -lt 3 || "$#" -gt 4 || ! "$2" =~ ^dc[12]$ || ! "$3" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
             echo "Usage: bash scripts/aap-configure.sh <failover|recovery> <dc1|dc2> <reference> [planned|failure]" >&2
@@ -25,7 +28,7 @@ case "${1:-}" in
         request_vars=(-e "demo_launch_operation=$1" -e "demo_launch_dc=$2"
             -e "demo_launch_reference=$3" -e "demo_launch_mode=$mode")
         ;;
-    *) echo "Usage: bash scripts/aap-configure.sh <check|inspect|inspect-openshift|build-ee|install|setup|readiness|failover|recovery>" >&2; exit 2 ;;
+    *) echo "Usage: bash scripts/aap-configure.sh <check|inspect|inspect-openshift|build-ee|install|setup|readiness|failover|recovery|portal-check|portal-install|portal-verify>" >&2; exit 2 ;;
 esac
 if [[ "$playbook" != run-workflow.yml && "$#" -ne 1 ]]; then
     echo "This wrapper does not accept arbitrary Ansible arguments." >&2
@@ -50,7 +53,7 @@ args=(--rm --user 0 --workdir /runner/project --entrypoint ansible-playbook
     --mount "type=bind,src=$repo_root/playbooks,dst=/runner/project/playbooks,readonly"
     --mount "type=bind,src=$repo_root/ansible.cfg,dst=/runner/project/ansible.cfg,readonly")
 for name in AAP_HOSTNAME AAP_USERNAME AAP_PASSWORD AAP_TOKEN AAP_VALIDATE_CERTS \
-    OPENSHIFT_API_URL OPENSHIFT_TOKEN OPENSHIFT_VALIDATE_CERTS AAP_OPENSHIFT_NAMESPACE \
+    OPENSHIFT_API_URL OPENSHIFT_TOKEN OPENSHIFT_VALIDATE_CERTS AAP_OPENSHIFT_NAMESPACE DEMO_PORTAL_REUSE_CLUSTER_REGISTRY_AUTH \
     DEMO_EE_IMAGE DEMO_EE_SOURCE_REVISION DEMO_SCM_REVISION DEMO_OPERATOR_PASSWORD TFE_ADDRESS TFE_TOKEN TF_TOKEN_app_terraform_io \
     HCP_TERRAFORM_ORGANIZATION AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
     TF_VAR_aws_region TF_VAR_aws_account_id HAPROXY_PUBLIC_IP; do

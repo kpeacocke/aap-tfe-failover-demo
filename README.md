@@ -444,6 +444,57 @@ generates/reuses a password in ignored `.local/aap-operator-password`, unless
 its restricted-user front door are still Phase 5; this phase does not claim
 Portal access or Portal-only authentication has been configured.
 
+## Phase 5: Self-Service Automation Portal
+
+The supported Red Hat Automation Portal Helm chart is pinned to **2.2.11**,
+with Portal 2.2 OCI plug-ins. It supports the existing AAP 2.7 and OpenShift
+4.16-4.20 on x86_64; the supplied platforms are never installed or upgraded.
+Portal deploys in demo-owned `ww-demo-portal`, using the existing ingress and
+storage provisioner. Detection refuses to overwrite an unrelated Portal; the
+demo release is reused/reconciled on repeat runs.
+
+The OCI installer needs `registry.redhat.io` authentication. After explicitly
+approving reuse of the RHDP registry credential, set this in private `.env`:
+
+```bash
+DEMO_PORTAL_REUSE_CLUSTER_REGISTRY_AUTH=true
+```
+
+Bootstrap copies only that registry entry from the existing cluster pull
+secret into the documented demo namespaced OCI Secret. It never displays,
+commits or saves that credential locally, and leaves the original untouched.
+The flag defaults to false. If reuse is not permitted, stop and arrange a
+separate registry credential before deployment.
+
+Publish the code to `main` first, then run:
+
+```bash
+bash scripts/aap-configure.sh portal-check
+bash scripts/aap-configure.sh portal-install
+bash scripts/aap-configure.sh portal-verify
+```
+
+The install creates a demo OAuth client and preserves its secret in OpenShift.
+Portal users sign in with their existing AAP account; no token form or
+administrator credential is exposed. Only **Datacentre Failover** and
+**Recover Datacentre** are registered. Automatic internal-job publication is
+disabled, and the demo operator cannot import templates or administer Portal.
+Use `ww-demo-operator` and the password in ignored `.local/aap-operator-password`
+unless a password was supplied explicitly during AAP setup.
+
+The supported `rhaap:launch-job-template` action cannot launch workflow
+templates directly. Two fixed, surveyed launcher jobs bridge to the existing
+staged workflows using a dedicated execute-only identity. Portal launches the
+bridge with the signed-in user's injected OAuth token. The existing workflow
+graph, guards and quarantine semantics remain the operational implementation;
+no administrator credential is attached to a consumer job.
+A separate read-scoped identity synchronizes only the demo organization.
+
+The printed readiness URL proves workload/Route health, **not** full acceptance.
+Verify operator OAuth login, exactly the two allowed templates, denied
+administration, and real Portal-launched failover/recovery before declaring
+Phase 5 complete. Phase 6 bootstrap/teardown remains out of scope.
+
 ## Validate locally
 
 ```bash
@@ -464,6 +515,7 @@ shellcheck scripts/*.sh terraform/shared/set-active-datacentre.sh tests/*.sh tes
 bash tests/test-runtime.sh
 bash tests/test-terraform-api.sh
 bash tests/test-aap-config.sh
+bash tests/test-portal-config.sh
 ```
 
 The runtime fixture uses real HAProxy and four copies of the demo application.

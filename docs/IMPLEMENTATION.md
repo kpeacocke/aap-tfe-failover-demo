@@ -1932,6 +1932,44 @@ Portal on RHDP OpenShift:
 
 Current AAP 2.7 portal custom templates are Git-backed YAML definitions that can launch AAP automation through `rhaap:*` actions. Use the current injected AAP token secret mechanism rather than asking the user to provide a token.
 
+Phase 5 uses the supported `redhat-rhaap-portal` Helm chart 2.2.11 (Portal
+2.2, compatible with AAP 2.7 and OpenShift 4.20), with OCI plug-ins explicitly
+enabled. The installed chart's real defaults/schemas are authoritative; newer
+documentation describing a 2.3 default is not applied to the 2.2 chart.
+Detection covers existing Portal workloads and Helm releases before creating
+the demo namespace. An unrelated deployment is reported, never overwritten.
+The presenter approved copying only the existing RHDP pull secret's
+`registry.redhat.io` entry into the demo namespace for OCI authentication.
+No registry credential is written locally or committed.
+
+The documented `rhaap:launch-job-template` action calls only the job-template
+API, not the workflow-template API. The approved compatibility bridge adds
+two fixed, surveyed launcher jobs, not replacements for the staged workflows.
+Portal injects the signed-in user's OAuth token to launch these jobs. Each
+launcher uses a dedicated demo service credential with execute-only access to
+the two workflows and waits for the real workflow result. Consumer jobs never
+receive an administrator credential. The restricted operator receives execute
+access to these two launchers, not the individual stages or setup jobs.
+Catalog synchronization uses a separate read-scoped token belonging to a
+demo-organization administrator. OAuth client secrets and reusable service
+credentials persist only in namespaced Secrets/AAP credentials.
+
+Only the two custom Git-backed templates are registered; automatic job-template
+catalog synchronization is disabled to avoid publishing the internal stages.
+Portal RBAC grants the demo operator template read/execute, not catalog import
+or administration. Existing AAP/OpenShift installations remain unchanged.
+
+Testing strategy: render the pinned real Helm chart without credentials and
+assert OCI mode, TLS verification, fixed catalog locations, survey/action
+allowlists and service-credential separation. Run Ansible/YAML/shell lint and
+the existing configuration guards. Live validation must prove detection,
+deployment health, repeat reconciliation, OAuth login, a two-template
+restricted catalog, denied administration and Portal-launched failover/recovery.
+Use the shared browser for the actual SPA/OAuth flows and real AAP/cluster
+services, not UI mocks. Runtime/API faults remain covered by Phase 4 fixtures.
+No existing Portal browser tests were present; new Portal-specific validation
+is wired into the current CI workflow. No Phase 6 bootstrap/teardown is added.
+
 ## Phase 6
 
 Bootstrap and teardown.

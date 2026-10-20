@@ -1,0 +1,16 @@
+---
+demo_portal_namespace: ww-demo-portal
+demo_portal_release: ww-demo-portal
+demo_portal_chart_version: "2.2.11"
+demo_portal_chart_url: >-
+  https://github.com/openshift-helm-charts/charts/releases/download/redhat-redhat-rhaap-portal-2.2.11/redhat-rhaap-portal-2.2.11.tgz
+demo_portal_chart_checksum: sha256:eeca35ffbfdbbf1f8c8679f179103212c15050caa8b8f85e308178ed004aee25
+demo_portal_labels:
+  app.kubernetes.io/managed-by: aap-tfe-failover-demo
+  demo.redhat.com/project: ww-demo-failover
+demo_portal_cluster_api: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_API_URL') | regex_replace('/$', '') }}"
+demo_portal_cluster_token: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_TOKEN') }}"
+demo_portal_validate_certs: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_VALIDATE_CERTS') | default('true', true) | bool }}"
+demo_portal_ca_cert: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_CA_CERT') | default(omit, true) }}"
+demo_portal_organization: Demo | Datacentre Failover
+demo_portal_catalog_base: https://github.com/kpeacocke/aap-tfe-failover-demo/blob/main/portal

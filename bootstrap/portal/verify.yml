@@ -1,0 +1,69 @@
+---
+- name: Verify the supported demo Portal workloads and Route
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - vars.yml
+  module_defaults:
+    group/kubernetes.core.k8s:
+      host: "{{ demo_portal_cluster_api }}"
+      api_key: "{{ demo_portal_cluster_token }}"
+      validate_certs: "{{ demo_portal_validate_certs }}"
+      ca_cert: "{{ demo_portal_ca_cert }}"
+  tasks:
+    - name: Inspect only this Portal release's deployments
+      kubernetes.core.k8s_info:
+        api_version: apps/v1
+        kind: Deployment
+        namespace: "{{ demo_portal_namespace }}"
+        label_selectors:
+          - "app.kubernetes.io/instance={{ demo_portal_release }}"
+      register: demo_portal_workloads
+
+    - name: Require at least one Portal deployment
+      ansible.builtin.assert:
+        that:
+          - demo_portal_workloads.resources | length > 0
+        fail_msg: No deployments found for the demo Portal release.
+
+    - name: Require available Portal workloads
+      ansible.builtin.assert:
+        that:
+          - item.status.availableReplicas | default(0) == item.spec.replicas | default(1)
+        fail_msg: Demo Portal workload is not healthy; inspect namespaced pod events and logs.
+      loop: "{{ demo_portal_workloads.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Inspect the chart-created Portal Route
+      kubernetes.core.k8s_info:
+        api_version: route.openshift.io/v1
+        kind: Route
+        namespace: "{{ demo_portal_namespace }}"
+      register: demo_portal_routes
+
+    - name: Require exactly one admitted HTTPS Portal Route
+      ansible.builtin.assert:
+        that:
+          - demo_portal_routes.resources | length == 1
+          - demo_portal_routes.resources[0].spec.tls is defined
+          - >-
+            demo_portal_routes.resources[0].status.ingress | map(attribute='conditions') | flatten |
+            selectattr('type', 'equalto', 'Admitted') | selectattr('status', 'equalto', 'True') | list | length > 0
+
+    - name: Verify the public Portal readiness endpoint with TLS verification
+      ansible.builtin.uri:
+        url: "https://{{ demo_portal_routes.resources[0].spec.host }}/.backstage/health/v1/readiness"
+        status_code: 200
+        timeout: 30
+      register: demo_portal_readiness
+      retries: 12
+      delay: 10
+      until: demo_portal_readiness.status == 200
+
+    - name: Report the verified Portal URL and remaining authenticated checks
+      ansible.builtin.debug:
+        msg: >-
+          Portal is healthy at https://{{ demo_portal_routes.resources[0].spec.host }}.
+          Verify OAuth login, the two-template restricted catalog and real failover/recovery before claiming Phase 5 acceptance.

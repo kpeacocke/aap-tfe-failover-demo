@@ -1,0 +1,35 @@
+[
+{% for operation in ['Failover', 'Recovery'] %}
+  {
+    "name": "Demo | Portal {{ operation }}",
+    "organization": {{ demo_portal_organization | to_json }},
+    "description": "Demo-managed fixed Portal launcher; delegates to the existing staged workflow.",
+    "project": "Demo | Datacentre Failover",
+    "inventory": "Demo | Runtime",
+    "execution_environment": "Demo | Failover Execution Environment",
+    "playbook": "playbooks/aap/portal-launch.yml",
+    "credentials": ["Demo | Portal Workflow Runner"],
+    "extra_vars": {"demo_portal_operation": "{{ operation | lower }}"},
+    "ask_variables_on_launch": false,
+    "ask_inventory_on_launch": false,
+    "ask_limit_on_launch": false,
+    "ask_scm_branch_on_launch": false,
+    "allow_simultaneous": false,
+    "timeout": 3600,
+    "survey_enabled": true,
+    "survey_spec": {
+      "name": "Datacentre {{ operation }}",
+      "description": "Approved operational inputs only; credentials, workflow and topology are fixed.",
+      "spec": [
+        {"question_name": "Service", "variable": "demo_service", "type": "multiplechoice", "choices": "Customer Orders Demo", "required": true, "default": "Customer Orders Demo"},
+        {"question_name": "{{ 'Target' if operation == 'Failover' else 'Recovered' }} datacentre", "variable": "{{ 'demo_target' if operation == 'Failover' else 'demo_recovery_dc' }}", "type": "multiplechoice", "choices": "dc1\ndc2", "required": true},
+{% if operation == 'Failover' %}
+        {"question_name": "Reason", "variable": "demo_reason", "type": "multiplechoice", "choices": "Site failure\nPlanned maintenance\nNetwork degradation\nDisaster recovery test", "required": true},
+{% endif %}
+        {"question_name": "Incident/change reference", "variable": "demo_reference", "type": "text", "required": true, "min": 1, "max": 64},
+        {"question_name": "Confirmation", "variable": "demo_confirmation", "type": "multiplechoice", "choices": "CONFIRM", "required": true}
+      ]
+    }
+  }{{ ',' if not loop.last else '' }}
+{% endfor %}
+]

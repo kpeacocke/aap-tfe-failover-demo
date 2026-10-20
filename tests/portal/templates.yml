@@ -1,0 +1,41 @@
+---
+- name: Validate the public Portal form and action contracts without credentials
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Load only the two public templates
+      ansible.builtin.set_fact:
+        demo_portal_test_templates:
+          - "{{ lookup('ansible.builtin.file', '../../portal/failover-template.yaml') | from_yaml }}"
+          - "{{ lookup('ansible.builtin.file', '../../portal/recovery-template.yaml') | from_yaml }}"
+
+    - name: Require only the supported action and injected user-token reference
+      ansible.builtin.assert:
+        that:
+          - item.kind == 'Template'
+          - item.spec.type == 'automation-template'
+          - item.metadata.annotations['ansible.com/template-source'] == 'scm'
+          - item.spec.steps | length == 1
+          - item.spec.steps[0].action == 'rhaap:launch-job-template'
+          - item.spec.steps[0].input.token == '${' ~ '{ secrets.aapToken }' ~ '}'
+          - item.spec.steps[0].input['values'].template in ['Demo | Portal Failover', 'Demo | Portal Recovery']
+          - item.spec.steps[0].input['values'].keys() | sort == ['extraVariables', 'template']
+          - >-
+            item.spec.parameters[0].properties.keys() |
+            difference(['target', 'reason', 'reference', 'confirmation', 'datacentre']) | length == 0
+          - item.spec.parameters[0].properties.confirmation.enum == ['CONFIRM']
+          - item.spec.parameters[0].properties.reference.maxLength == 64
+      loop: "{{ demo_portal_test_templates }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Require the restricted Portal policy to omit catalog mutation and administration
+      ansible.builtin.assert:
+        that:
+          - "'catalog.entity.create' not in demo_portal_test_policy"
+          - "'catalog.location.create' not in demo_portal_test_policy"
+          - "'permission.' not in demo_portal_test_policy"
+          - "'user:default/ww-demo-operator' in demo_portal_test_policy"
+      vars:
+        demo_portal_test_policy: "{{ lookup('ansible.builtin.file', '../../bootstrap/portal/policy.csv') }}"

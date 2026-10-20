@@ -1,0 +1,82 @@
+---
+- name: Render and inspect the pinned supported chart without real credentials
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../../bootstrap/portal/vars.yml
+  vars:
+    demo_portal_domain: apps.example.test
+    demo_portal_hostname: ww-demo-portal.apps.example.test
+  tasks:
+    - name: Validate real Helm chart configuration
+      block:
+        - name: Create a disposable chart directory
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: -ww-demo-chart-test
+          register: demo_portal_chart_dir
+
+        - name: Fetch the pinned archive with its published digest
+          ansible.builtin.get_url:
+            url: "{{ demo_portal_chart_url }}"
+            dest: "{{ demo_portal_chart_dir.path }}/portal.tgz"
+            checksum: "{{ demo_portal_chart_checksum }}"
+            mode: "0600"
+
+        - name: Extract real dependency schemas and defaults
+          ansible.builtin.unarchive:
+            src: "{{ demo_portal_chart_dir.path }}/portal.tgz"
+            dest: "{{ demo_portal_chart_dir.path }}"
+            remote_src: true
+
+        - name: Load chart defaults
+          ansible.builtin.set_fact:
+            demo_portal_chart_defaults: >-
+              {{ lookup('ansible.builtin.file', demo_portal_chart_dir.path ~ '/redhat-rhaap-portal/values.yaml') | from_yaml }}
+
+        - name: Render actual demo Helm values
+          ansible.builtin.set_fact:
+            demo_portal_test_values: "{{ lookup('ansible.builtin.template', '../../bootstrap/portal/values.yml.j2') | from_yaml }}"
+
+        - name: Write only credential-free test values
+          ansible.builtin.copy:
+            dest: "{{ demo_portal_chart_dir.path }}/values.yml"
+            content: "{{ demo_portal_test_values | to_nice_yaml }}"
+            mode: "0600"
+
+        - name: Exercise the real chart schema and templates
+          ansible.builtin.command:
+            argv:
+              - helm
+              - template
+              - ww-demo-portal
+              - "{{ demo_portal_chart_dir.path }}/redhat-rhaap-portal"
+              - --namespace
+              - ww-demo-portal
+              - --values
+              - "{{ demo_portal_chart_dir.path }}/values.yml"
+          register: demo_portal_test_render
+          changed_when: false
+
+        - name: Require OCI authentication and fixed secure catalog configuration
+          ansible.builtin.assert:
+            that:
+              - demo_portal_test_values['redhat-developer-hub'].global.pluginMode == 'oci'
+              - demo_portal_test_values['redhat-developer-hub'].global.imageTagInfo == '2.2'
+              - demo_portal_test_app.ansible.rhaap.checkSSL
+              - demo_portal_test_app.auth.providers.rhaap.production.checkSSL
+              - demo_portal_test_app.catalog.locations | length == 2
+              - "'secrets.aapToken' not in demo_portal_test_render.stdout"
+              - "'ww-demo-portal-dynamic-plugins-registry-auth' in demo_portal_test_render.stdout"
+              - "'ww-demo-portal-rbac' in demo_portal_test_render.stdout"
+              - "'ww-demo-portal.apps.example.test' in demo_portal_test_render.stdout"
+              - "'enabled: false' in (demo_portal_test_app.catalog.providers | to_nice_yaml)"
+          vars:
+            demo_portal_test_app: "{{ demo_portal_test_values['redhat-developer-hub'].upstream.backstage.appConfig }}"
+      always:
+        - name: Remove only this test's temporary files
+          ansible.builtin.file:
+            path: "{{ demo_portal_chart_dir.path }}"
+            state: absent
+          when: demo_portal_chart_dir.path is defined

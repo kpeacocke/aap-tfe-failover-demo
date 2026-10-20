@@ -50,6 +50,7 @@ jobs:
       - name: Validate AAP configuration and expose certified module schemas
         run: |
           bash tests/test-aap-config.sh
+          bash tests/test-portal-config.sh
           mkdir -p .local/aap-collections/ansible_collections
           container=$(docker create ww-demo-aap-ee:phase4 /bin/true)
           docker cp "$container:/usr/share/ansible/collections/ansible_collections/ansible" .local/aap-collections/ansible_collections/
@@ -60,6 +61,8 @@ jobs:
           export ANSIBLE_COLLECTIONS_PATH="$PWD/.local/aap-collections:$HOME/.ansible/collections"
           ansible-lint playbooks/runtime-failover.yml playbooks/terraform-discover.yml playbooks/terraform-workspace.yml playbooks/aap/stage.yml playbooks/aap/readiness.yml roles bootstrap/check-aap.yml bootstrap/install-demo.yml bootstrap/setup-demo.yml bootstrap/build-ee.yml bootstrap/check-runtime.yml bootstrap/run-workflow.yml bootstrap/inspect-aap.yml bootstrap/inspect-openshift.yml tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
           yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap playbooks roles tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
+          ansible-lint bootstrap/portal/check.yml bootstrap/portal/deploy.yml bootstrap/portal/verify.yml playbooks/aap/portal-launch.yml tests/portal
+          yamllint -d '{extends: default, rules: {line-length: disable}}' portal tests/portal
       - name: Test Terraform API integration without cloud credentials
         run: bash tests/test-terraform-api.sh
       - name: Test runtime failover and failure handling without cloud credentials

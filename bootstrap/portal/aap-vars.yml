@@ -1,0 +1,36 @@
+---
+aap_configuration_secure_logging: true
+aap_applications:
+  - name: Demo | Portal OAuth
+    organization: "{{ demo_portal_organization }}"
+    description: Demo-managed Portal login; authorization-code flow with confidential client.
+    authorization_grant_type: authorization-code
+    client_type: confidential
+    redirect_uris:
+      - "https://{{ demo_portal_hostname }}/api/auth/rhaap/handler/frame"
+    skip_authorization: false
+    register: demo_portal_oauth
+aap_user_accounts:
+  - username: ww-demo-portal-catalog
+    password: "{{ demo_portal_catalog_password }}"
+    email: ww-demo-portal-catalog@example.invalid
+    is_superuser: false
+    is_platform_auditor: false
+    update_secrets: false
+    organizations: ["{{ demo_portal_organization }}"]
+  - username: ww-demo-portal-runner
+    password: "{{ demo_portal_runner_password }}"
+    email: ww-demo-portal-runner@example.invalid
+    is_superuser: false
+    is_platform_auditor: false
+    update_secrets: false
+    organizations: ["{{ demo_portal_organization }}"]
+gateway_role_user_assignments:
+  - user: ww-demo-portal-catalog
+    role_definition: Organization Admin
+    object_ids: ["{{ demo_portal_organization }}"]
+controller_roles:
+  - role: execute
+    users: [ww-demo-portal-runner]
+    workflows: [Demo - Datacentre Failover, Demo - Datacentre Recovery]
+    lookup_organization: "{{ demo_portal_organization }}"

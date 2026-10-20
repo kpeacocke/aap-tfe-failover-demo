@@ -1,0 +1,120 @@
+---
+- name: Detect the existing platform and Portal before reconciliation
+  ansible.builtin.import_playbook: check.yml
+
+- name: Reconcile only the demo Portal add-on
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../aap-connection-vars.yml
+    - vars.yml
+  module_defaults:
+    group/kubernetes.core.k8s:
+      host: "{{ demo_portal_cluster_api }}"
+      api_key: "{{ demo_portal_cluster_token }}"
+      validate_certs: "{{ demo_portal_validate_certs }}"
+      ca_cert: "{{ demo_portal_ca_cert }}"
+    ansible.platform.application:
+      pkce_required: false
+  tasks:
+    - name: Inspect namespace ownership before any changes
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Namespace
+        name: "{{ demo_portal_namespace }}"
+      register: demo_portal_existing_namespace
+
+    - name: Require explicit registry approval and demo ownership of an existing namespace
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'DEMO_PORTAL_REUSE_CLUSTER_REGISTRY_AUTH') | bool
+          - >-
+            demo_portal_existing_namespace.resources | length == 0 or
+            demo_portal_existing_namespace.resources[0].metadata.labels.get('app.kubernetes.io/managed-by', '') == 'aap-tfe-failover-demo'
+        fail_msg: Approve registry credential reuse explicitly and use only a demo-owned ww-demo-portal namespace; no changes were made.
+
+    - name: Reconcile the demo-owned namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ demo_portal_namespace }}"
+            labels: "{{ demo_portal_labels }}"
+
+    - name: Reconcile reusable Portal credentials without disclosing them
+      ansible.builtin.include_tasks: credentials.yml
+
+    - name: Reconcile only Portal launcher jobs and their restricted roles
+      ansible.builtin.include_tasks: configure.yml
+
+    - name: Render and install the pinned supported chart
+      block:
+        - name: Allocate a temporary chart workspace
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: -ww-demo-portal
+          register: demo_portal_chart_dir
+
+        - name: Fetch the verified published chart archive
+          ansible.builtin.get_url:
+            url: "{{ demo_portal_chart_url }}"
+            dest: "{{ demo_portal_chart_dir.path }}/portal.tgz"
+            checksum: "{{ demo_portal_chart_checksum }}"
+            mode: "0600"
+
+        - name: Extract the chart including its supported dependency defaults
+          ansible.builtin.unarchive:
+            src: "{{ demo_portal_chart_dir.path }}/portal.tgz"
+            dest: "{{ demo_portal_chart_dir.path }}"
+            remote_src: true
+
+        - name: Load the real chart defaults for additive volume configuration
+          ansible.builtin.set_fact:
+            demo_portal_chart_defaults: >-
+              {{ lookup('ansible.builtin.file', demo_portal_chart_dir.path ~ '/redhat-rhaap-portal/values.yaml') | from_yaml }}
+
+        - name: Reconcile the fixed Portal authorization policy
+          kubernetes.core.k8s:
+            state: present
+            definition:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: ww-demo-portal-rbac
+                namespace: "{{ demo_portal_namespace }}"
+                labels: "{{ demo_portal_labels }}"
+              data:
+                policy.csv: "{{ lookup('ansible.builtin.file', 'policy.csv') }}"
+
+        - name: Install or reconcile the supported Portal release
+          kubernetes.core.helm:
+            name: "{{ demo_portal_release }}"
+            chart_ref: "{{ demo_portal_chart_dir.path }}/redhat-rhaap-portal"
+            release_namespace: "{{ demo_portal_namespace }}"
+            host: "{{ demo_portal_cluster_api }}"
+            api_key: "{{ demo_portal_cluster_token }}"
+            validate_certs: "{{ demo_portal_validate_certs }}"
+            ca_cert: "{{ demo_portal_ca_cert }}"
+            values: "{{ lookup('ansible.builtin.template', 'values.yml.j2') | from_yaml }}"
+            wait: true
+            timeout: 20m0s
+            history_max: 3
+          no_log: true
+      rescue:
+        - name: Surface Portal deployment failure
+          ansible.builtin.fail:
+            msg: >-
+              Portal Helm deployment failed in {{ demo_portal_namespace }}.
+              Inspect demo pod events and init-container logs; no AAP/OpenShift installation or upgrade was attempted.
+      always:
+        - name: Remove only the temporary chart workspace
+          ansible.builtin.file:
+            path: "{{ demo_portal_chart_dir.path }}"
+            state: absent
+          when: demo_portal_chart_dir.path is defined
+
+- name: Verify the actual deployed Portal
+  ansible.builtin.import_playbook: verify.yml

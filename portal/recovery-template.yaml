@@ -1,0 +1,49 @@
+---
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: ww-demo-recovery-custom
+  title: Recover Datacentre
+  description: Validate the recovered standby and release its original quarantine without switching active traffic.
+  annotations:
+    ansible.com/template-source: scm
+  tags: [demo-managed, datacentre]
+spec:
+  owner: user:default/ww-demo-operator
+  type: automation-template
+  parameters:
+    - title: Recover a standby datacentre
+      required: [datacentre, reference, confirmation]
+      properties:
+        datacentre:
+          title: Recovered datacentre
+          type: string
+          enum: [dc1, dc2]
+        reference:
+          title: Original incident/change reference
+          description: Must match the reference that created the site's quarantine.
+          type: string
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          minLength: 1
+          maxLength: 64
+        confirmation:
+          title: Confirm recovered standby release
+          type: string
+          enum: [CONFIRM]
+  steps:
+    - id: execute
+      name: Execute the staged AAP recovery workflow
+      action: rhaap:launch-job-template
+      input:
+        token: ${{ secrets.aapToken }}
+        values:
+          template: Demo | Portal Recovery
+          extraVariables:
+            demo_service: Customer Orders Demo
+            demo_recovery_dc: ${{ parameters.datacentre }}
+            demo_reference: ${{ parameters.reference }}
+            demo_confirmation: ${{ parameters.confirmation }}
+  output:
+    text:
+      - title: Recovered standby available
+        content: "Request ${{ parameters.reference }} completed. The recovered site remains standby; traffic was not switched back."

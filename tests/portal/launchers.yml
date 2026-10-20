@@ -1,0 +1,44 @@
+---
+- name: Validate fixed launcher configuration without any platform credentials
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    demo_portal_organization: Demo | Datacentre Failover
+  tasks:
+    - name: Render real launcher resources
+      ansible.builtin.set_fact:
+        demo_portal_test_launchers: "{{ lookup('ansible.builtin.template', '../../bootstrap/portal/launchers.json.j2') | from_json }}"
+
+    - name: Require credential separation and immutable launcher configuration
+      ansible.builtin.assert:
+        that:
+          - demo_portal_test_launchers | length == 2
+          - item.credentials == ['Demo | Portal Workflow Runner']
+          - item.playbook == 'playbooks/aap/portal-launch.yml'
+          - item.extra_vars.demo_portal_operation in ['failover', 'recovery']
+          - not item.ask_variables_on_launch
+          - not item.ask_inventory_on_launch
+          - not item.ask_limit_on_launch
+          - not item.ask_scm_branch_on_launch
+          - item.survey_enabled
+          - >-
+            item.survey_spec.spec | map(attribute='variable') |
+            difference(['demo_service', 'demo_target', 'demo_recovery_dc',
+                        'demo_reason', 'demo_reference', 'demo_confirmation']) | length == 0
+      loop: "{{ demo_portal_test_launchers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Verify the runner identity has no administrative or stage execution grants
+      ansible.builtin.include_vars:
+        file: ../../bootstrap/portal/aap-vars.yml
+        name: demo_portal_test_aap
+
+    - name: Require only the approved workflows for the runner
+      ansible.builtin.assert:
+        that:
+          - demo_portal_test_aap.controller_roles | length == 1
+          - demo_portal_test_aap.controller_roles[0].role == 'execute'
+          - demo_portal_test_aap.controller_roles[0].users == ['ww-demo-portal-runner']
+          - demo_portal_test_aap.controller_roles[0].workflows | sort == ['Demo - Datacentre Failover', 'Demo - Datacentre Recovery']
