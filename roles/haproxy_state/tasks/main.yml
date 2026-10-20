@@ -1,0 +1,37 @@
+---
+- name: Read HAProxy runtime statistics
+  ansible.builtin.command:
+    argv:
+      - socat
+      - "-"
+      - "UNIX-CONNECT:{{ haproxy_state_socket }}"
+    stdin: show stat
+  register: haproxy_state_raw
+  changed_when: false
+
+- name: Parse application server statistics
+  ansible.builtin.set_fact:
+    haproxy_state_servers: >-
+      {{ (haproxy_state_raw.stdout | regex_replace('^# ', '') | community.general.from_csv)
+         | selectattr('pxname', 'equalto', haproxy_state_backend)
+         | selectattr('type', 'equalto', '2') | list }}
+
+- name: Require the exact demo backend topology
+  ansible.builtin.assert:
+    that:
+      - haproxy_state_servers | length == 4
+      - >-
+        haproxy_state_servers | map(attribute='svname') | sort ==
+        (runtime_sites.dc1 + runtime_sites.dc2) | map(attribute='server') | sort
+    fail_msg: HAProxy does not contain exactly the four expected demo application servers. Refusing to alter traffic.
+
+- name: Verify runtime addresses match Terraform outputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        (haproxy_state_servers | selectattr('svname', 'equalto', item.server) | first).addr ==
+        item.address ~ ':8080'
+    fail_msg: "HAProxy address for {{ item.server }} differs from Terraform outputs. Refusing to alter traffic."
+  loop: "{{ runtime_sites.dc1 + runtime_sites.dc2 }}"
+  loop_control:
+    label: "{{ item.server }}"

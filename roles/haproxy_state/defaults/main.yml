@@ -1,0 +1,5 @@
+---
+haproxy_state_socket: /run/haproxy/admin.sock
+haproxy_state_backend: demo_applications
+haproxy_state_active_dc: "{{ runtime_target_dc }}"
+haproxy_state_inactive_dc: "{{ runtime_source_dc }}"

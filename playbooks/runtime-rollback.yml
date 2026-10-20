@@ -1,0 +1,15 @@
+---
+- name: Activate the original source and disable the failed target
+  ansible.builtin.include_role:
+    name: haproxy_state
+    tasks_from: activate
+  vars:
+    haproxy_state_active_dc: "{{ runtime_source_dc_original }}"
+    haproxy_state_inactive_dc: "{{ runtime_target_dc_original }}"
+
+- name: Validate restored service
+  ansible.builtin.include_role:
+    name: synthetic_validation
+  vars:
+    synthetic_validation_active_dc: "{{ runtime_source_dc_original }}"
+    synthetic_validation_inactive_dc: "{{ runtime_target_dc_original }}"

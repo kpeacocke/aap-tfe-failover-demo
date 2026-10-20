@@ -1,4 +1,4 @@
-name: Phase 1 validation
+name: Demo validation
 
 on:
   pull_request:
@@ -19,7 +19,7 @@ jobs:
           terraform_version: 1.9.8
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
       - name: Lint shell scripts
         uses: ludeeus/action-shellcheck@2.0.0
       - name: Check Terraform formatting
@@ -38,3 +38,15 @@ jobs:
         run: bash tests/test-ssh-key.sh
       - name: Test HCP workspace initialization
         run: bash tests/test-workspace.sh
+      - name: Test runtime CLI configuration
+        run: bash tests/test-runtime-env.sh
+      - name: Install Ansible validation tools
+        run: |
+          pip install 'ansible-core==2.19.3' ansible-lint yamllint
+          ansible-galaxy collection install -r bootstrap/requirements.yml
+      - name: Lint Ansible runtime automation
+        run: |
+          ansible-lint playbooks/runtime-failover.yml roles
+          yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles
+      - name: Test runtime failover and failure handling without cloud credentials
+        run: bash tests/test-runtime.sh

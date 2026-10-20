@@ -1719,7 +1719,7 @@ application health endpoints passed. Front-door requests alternated between
 both DC1 nodes, then both DC2 nodes after manual activation, then both DC1
 nodes after switching back. The browser page displayed a healthy DC1 service.
 Post-deployment plans for all three roots reported no changes. Phase 2 is the
-next recommended phase; AAP and Portal configuration remain unimplemented.
+next implementation step after Phase 1; its completed validation is recorded below.
 
 ## Phase 2
 
@@ -1731,6 +1731,32 @@ Ansible runtime roles:
 - validation.
 
 Prove failover from CLI.
+
+Phase 2 runtime roles and the CLI entrypoint are implemented. The entrypoint
+reads the existing Terraform roots' JSON outputs; API-based discovery/output
+retrieval and workspace lock/unlock remain Phase 3. AAP and Portal are not
+configured by Phase 2.
+
+Live CLI validation on 2026-10-20 proved DC1-to-DC2 failover and DC2-to-DC1
+switchback, with both nodes at the active site serving front-door requests.
+The reusable roles check node identity/version, drain source sessions, activate
+the target through the existing HAProxy socket, and validate external traffic,
+the application page and source isolation. Operations use an exclusive
+HAProxy-side marker; failures return nonzero even after a successful rollback.
+
+Local tests use real HAProxy and four application processes in a disposable
+container, without lab credentials. They cover invalid requests, an existing
+operation marker, target readiness failure, refusal to skip draining a
+responsive source, planned switching in both directions, target failure with
+validated rollback, unavailable-source escalation, successful failure-mode
+activation, and a nonzero-session drain timeout with rollback. The timeout
+case uses TCP mode to hold an idle session deterministically; the remaining
+scenarios use HTTP mode like the deployed front door.
+
+Ansible/YAML/shell lint and the existing application and Phase 1 helper
+regressions pass. Phase 3 is next; do not claim Terraform workspace quarantine
+until it is implemented and validated. Failure simulation on the live AWS
+nodes, AAP objects, and Portal configuration remain later-phase work.
 
 ## Phase 3
 

@@ -2,8 +2,8 @@
 
 This repository demonstrates a small AWS application spanning two datacentres,
 fronted by HAProxy. The implementation is being delivered in phases; the
-current phase provisions the infrastructure and demonstrates a manual traffic
-switch.
+completed phases provision the infrastructure and demonstrate both a manual
+traffic switch and a validated Ansible CLI failover.
 
 The application is branded "Datacentre Failover Demo" for use with any customer.
 AWS demo tags use `Datacentre-Failover`. Existing `ww-demo-*` identifiers and
@@ -184,6 +184,72 @@ port 8080 is reachable only from HAProxy's security group. The remote switch
 command accepts only `dc1` or `dc2` and leaves the current backend untouched if
 the target health checks fail.
 
+## Phase 2: Ansible runtime failover
+
+Phase 2 adds reusable `application_health`, `haproxy_state`, and
+`synthetic_validation` roles. It does not configure AAP/Portal, lock Terraform
+workspaces, or change AWS infrastructure.
+
+Use Ansible Core 2.19 or later and install the verified collection version:
+
+```bash
+ansible-galaxy collection install -r bootstrap/requirements.yml
+bash scripts/runtime-failover.sh dc2 CHG0012345
+bash scripts/runtime-failover.sh dc1 CHG0012346
+```
+
+The wrapper loads `.env` and reads the three initialized Terraform roots'
+JSON outputs. It generates a private, temporary Ansible inventory rather than
+hardcoding IP addresses. `HAPROXY_PUBLIC_IP` remains useful for the Phase 1
+helper, but Phase 2 uses the actual shared output. SSH host-key verification
+stays enabled; trust the HAProxy host's verified key before the first run.
+The presenter's machine needs SSH and HTTP access to the front door.
+
+The default `planned` mode:
+
+1. Acquires an exclusive marker on HAProxy and discovers the actual active site.
+2. Verifies the backend addresses against Terraform outputs and requires both
+   target nodes' health, datacentre, hostname, and version to match.
+3. Drains source servers, waits for zero active sessions, and places them in
+   maintenance without killing established sessions.
+4. Activates the target through the runtime socket without restarting HAProxy.
+5. Checks every target node, samples eight external health requests, requires
+   both target hosts to serve traffic, checks the application page, and verifies
+   no new source sessions during validation.
+
+Set `TF_VAR_application_version` in `.env` if changing the deployed version
+(default `1.0.0`). `FAILOVER_DRAIN_TIMEOUT_SECONDS` defaults to 60; on timeout,
+the operation aborts and attempts rollback only if both original source nodes
+are still healthy. A successfully rolled-back failover still exits nonzero.
+The aggregate drain deadline is enforced on HAProxy, rather than being extended
+by Ansible/SSH polling round trips. The small Bash socket-polling helper is
+needed because the collection module waits per server, not for an aggregate
+session threshold under one shared deadline.
+If rollback cannot be validated, the CLI fails and requires human escalation.
+Already-active targets, ambiguous runtime states, invalid requests, and
+unready targets are rejected rather than treated as successful switches.
+
+For a demonstrated source outage, use:
+
+```bash
+bash scripts/runtime-failover.sh dc2 INC0012345 failure
+```
+
+`failure` mode refuses to skip draining if either source health endpoint still
+returns HTTP 200. It does not simulate an outage; do not stop live services just
+to try it. Fault injection is covered in the isolated test fixture.
+
+Concurrent Phase 2 operations are refused. If SSH or Ansible is interrupted,
+the marker `/run/ww-demo-failover.lock` may remain; inspect its `request.json`,
+confirm no operation is still running, and inspect actual HAProxy state before
+an administrator removes it. Do not run the legacy manual helper, Terraform
+apply/destroy, or other runtime socket commands concurrently with this CLI.
+HAProxy restart still resets to Terraform's configured DC1-active default;
+persistent operational state is not implemented in this phase.
+
+Successful runs publish structured results with `ansible.builtin.set_stats`.
+No workspace quarantine is claimed: that is the next phase.
+
 ## Validate locally
 
 ```bash
@@ -196,8 +262,20 @@ python3 -m unittest discover -s tests -v
 bash tests/test-terraform-env.sh
 bash tests/test-ssh-key.sh
 bash tests/test-workspace.sh
-shellcheck scripts/*.sh terraform/shared/set-active-datacentre.sh tests/*.sh
+bash tests/test-runtime-env.sh
+ansible-lint playbooks/runtime-failover.yml roles
+yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles
+shellcheck scripts/*.sh terraform/shared/set-active-datacentre.sh tests/*.sh tests/runtime/*.sh roles/haproxy_state/files/*.sh
+# Requires Docker; disposable local fixture, no .env, cloud credentials or AWS changes.
+bash tests/test-runtime.sh
 ```
+
+The runtime fixture uses real HAProxy and four copies of the demo application.
+It tests input/readiness/concurrency guards, bidirectional planned switching,
+target failure with validated rollback, unavailable-source escalation,
+successful failure-mode switching, and nonzero-session drain timeout. The
+timeout case uses a TCP-mode fixture to hold an idle session deterministically;
+the other cases use the deployed HTTP-mode configuration.
 
 The Terraform validation initializes providers but does not contact AWS or
 create infrastructure. Applying the configuration creates billable AWS

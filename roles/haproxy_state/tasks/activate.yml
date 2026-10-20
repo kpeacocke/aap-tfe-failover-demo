@@ -1,0 +1,12 @@
+---
+- name: Activate healthy target servers without restarting HAProxy
+  ansible.builtin.include_tasks: set_servers.yml
+  vars:
+    haproxy_state_nodes: "{{ runtime_sites[haproxy_state_active_dc] }}"
+    haproxy_state_desired: enabled
+
+- name: Ensure the other datacentre remains in maintenance
+  ansible.builtin.include_tasks: set_servers.yml
+  vars:
+    haproxy_state_nodes: "{{ runtime_sites[haproxy_state_inactive_dc] }}"
+    haproxy_state_desired: disabled

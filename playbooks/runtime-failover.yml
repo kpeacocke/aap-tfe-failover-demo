@@ -1,0 +1,192 @@
+---
+- name: Perform a CLI runtime failover without changing infrastructure
+  hosts: haproxy
+  gather_facts: false
+  become: true
+  vars:
+    runtime_mode: "{{ failover_mode | default('planned') }}"
+    runtime_application_version: "{{ failover_application_version | default('1.0.0') }}"
+    runtime_drain_timeout_seconds: "{{ failover_drain_timeout_seconds | default(60) }}"
+    runtime_drain_threshold: 0
+    runtime_health_retries: 10
+    runtime_health_delay_seconds: 3
+    runtime_validation_samples: 8
+    runtime_operation_marker: /run/ww-demo-failover.lock
+
+  pre_tasks:
+    - name: Validate runtime request and safety bounds
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - ansible_play_hosts_all | length == 1
+          - runtime_target_dc | default('') in ['dc1', 'dc2']
+          - runtime_reference | default('') is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+          - runtime_mode in ['planned', 'failure']
+          - runtime_application_version | length > 0
+          - runtime_drain_timeout_seconds | string is match('^[1-9][0-9]*$')
+          - runtime_drain_timeout_seconds | int >= 1
+          - runtime_drain_timeout_seconds | int <= 600
+          - runtime_drain_threshold | string is match('^[0-9]+$')
+          - runtime_drain_threshold | int >= 0
+          - runtime_health_delay_seconds | string is match('^[1-9][0-9]*$')
+          - runtime_health_delay_seconds | int >= 1
+          - runtime_health_delay_seconds | int <= 30
+          - runtime_health_retries | string is match('^[1-9][0-9]*$')
+          - runtime_health_retries | int >= 2
+          - runtime_health_retries | int <= 60
+          - runtime_validation_samples | string is match('^[1-9][0-9]*$')
+          - runtime_validation_samples | int >= 4
+          - runtime_validation_samples | int <= 100
+          - runtime_sites.keys() | sort == ['dc1', 'dc2']
+          - runtime_sites.dc1 | length == 2
+          - runtime_sites.dc2 | length == 2
+          - runtime_frontdoor_url is match('^https?://[^/]+$')
+        fail_msg: >-
+          Supply one HAProxy host, Terraform-derived topology, target dc1/dc2, a reference
+          (letters/digits/dot/underscore/hyphen, 1-64 characters) and mode planned/failure.
+          Runtime mutations do not support --check. No traffic has been changed.
+
+    - name: Acquire an exclusive operation marker on HAProxy
+      ansible.builtin.command:
+        argv: [mkdir, "{{ runtime_operation_marker }}"]
+      changed_when: true
+      register: runtime_marker
+      failed_when: runtime_marker.rc != 0
+
+  tasks:
+    - name: Execute the guarded runtime operation
+      block:
+        - name: Record the marker owner for interruption diagnostics
+          ansible.builtin.copy:
+            dest: "{{ runtime_operation_marker }}/request.json"
+            mode: "0600"
+            content: >-
+              {{ {'reference': runtime_reference, 'target_dc': runtime_target_dc, 'mode': runtime_mode,
+                  'started_at': now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ')} | to_nice_json }}
+
+        - name: Discover actual HAProxy state
+          ansible.builtin.include_role:
+            name: haproxy_state
+
+        - name: Identify non-maintenance servers
+          ansible.builtin.set_fact:
+            runtime_active_servers: "{{ haproxy_state_servers | rejectattr('status', 'search', '^MAINT') | list }}"
+
+        - name: Require one unambiguous active site and no unfinished drain
+          ansible.builtin.assert:
+            that:
+              - runtime_active_servers | length == 2
+              - runtime_active_servers | selectattr('status', 'search', '^DRAIN|^NOLB') | list | length == 0
+              - >-
+                runtime_active_servers | map(attribute='svname') | sort in
+                [runtime_sites.dc1 | map(attribute='server') | sort, runtime_sites.dc2 | map(attribute='server') | sort]
+            fail_msg: Ambiguous or partially changed HAProxy state. Inspect the socket and resolve the previous operation before retrying.
+
+        - name: Record discovered source and initial session count
+          ansible.builtin.set_fact:
+            runtime_source_dc: "{{ 'dc1' if runtime_active_servers[0].svname in runtime_sites.dc1 | map(attribute='server') | list else 'dc2' }}"
+            runtime_initial_connections: "{{ runtime_active_servers | map(attribute='scur') | map('int') | sum }}"
+
+        - name: Reject a target that is already active
+          ansible.builtin.assert:
+            that:
+              - runtime_source_dc != runtime_target_dc
+            fail_msg: "{{ runtime_target_dc }} is already active. No traffic changes are needed."
+
+        - name: Validate the entire target before touching the source
+          ansible.builtin.include_role:
+            name: application_health
+          vars:
+            application_health_dc: "{{ runtime_target_dc }}"
+            application_health_nodes: "{{ runtime_sites[runtime_target_dc] }}"
+            application_health_required: true
+
+        - name: Inspect source health for drain and rollback decisions
+          ansible.builtin.include_role:
+            name: application_health
+          vars:
+            application_health_dc: "{{ runtime_source_dc }}"
+            application_health_nodes: "{{ runtime_sites[runtime_source_dc] }}"
+            application_health_required: false
+
+        - name: Require demonstrated source unavailability before skipping graceful drain
+          ansible.builtin.assert:
+            that:
+              - application_health_requests.results | selectattr('status', 'equalto', 200) | list | length == 0
+            fail_msg: Source still responds to health requests. Use planned mode to drain it safely.
+          when: runtime_mode == 'failure'
+
+        - name: Switch traffic with health-gated rollback on failure
+          block:
+            - name: Preserve original datacentres for rollback
+              ansible.builtin.set_fact:
+                runtime_source_dc_original: "{{ runtime_source_dc }}"
+                runtime_target_dc_original: "{{ runtime_target_dc }}"
+
+            - name: Drain or disable the source
+              ansible.builtin.include_role:
+                name: haproxy_state
+                tasks_from: drain
+
+            - name: Activate the target
+              ansible.builtin.include_role:
+                name: haproxy_state
+                tasks_from: activate
+
+            - name: Validate the external service and source isolation
+              ansible.builtin.include_role:
+                name: synthetic_validation
+
+          rescue:
+            - name: Preserve the original operational failure
+              ansible.builtin.set_fact:
+                runtime_failure: >-
+                  {{ ansible_failed_result.msg | default('Runtime transition failed') }}{{
+                     ': ' ~ ansible_failed_result.stderr | trim if ansible_failed_result.stderr | default('') | length > 0 else '' }}
+
+            - name: Recheck source before attempting rollback
+              ansible.builtin.include_role:
+                name: application_health
+              vars:
+                application_health_dc: "{{ runtime_source_dc }}"
+                application_health_nodes: "{{ runtime_sites[runtime_source_dc] }}"
+                application_health_required: false
+
+            - name: Refuse impossible rollback
+              ansible.builtin.fail:
+                msg: >-
+                  FAILOVER UNSUCCESSFUL: {{ runtime_failure }}. Source {{ runtime_source_dc }} is not fully healthy.
+                  Automatic rollback is unsafe; human escalation required. Inspect HAProxy before another operation.
+              when: application_health_healthy | length != runtime_sites[runtime_source_dc] | length
+
+            - name: Restore and validate the healthy original source
+              ansible.builtin.include_tasks: runtime-rollback.yml
+
+            - name: Report failed failover even when rollback succeeded
+              ansible.builtin.fail:
+                msg: "FAILOVER UNSUCCESSFUL: {{ runtime_failure }}. Rollback to {{ runtime_source_dc }} validated successfully."
+
+        - name: Publish CLI result for future workflow reuse
+          ansible.builtin.set_stats:
+            data:
+              runtime_failover:
+                result: success
+                reference: "{{ runtime_reference }}"
+                source_dc: "{{ runtime_source_dc }}"
+                target_dc: "{{ runtime_target_dc }}"
+                drain: "{{ haproxy_state_drain_result }}"
+                validation: "{{ synthetic_validation_result }}"
+                terraform_workspace_quarantine: not_implemented_phase_3
+
+        - name: Summarize validated runtime failover
+          ansible.builtin.debug:
+            msg:
+              - "FAILOVER COMPLETE: {{ runtime_source_dc | upper }} -> {{ runtime_target_dc | upper }} ({{ runtime_reference }})"
+              - "Target nodes healthy: 2/2; both served front-door traffic; source new sessions: 0."
+              - "Terraform workspaces are unchanged. Quarantine is Phase 3; AAP and Portal remain untouched."
+
+      always:
+        - name: Release this operation's marker
+          ansible.builtin.file:
+            path: "{{ runtime_operation_marker }}"
+            state: absent

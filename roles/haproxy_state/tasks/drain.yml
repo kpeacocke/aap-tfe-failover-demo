@@ -1,0 +1,41 @@
+---
+- name: Stop new sessions on the source without terminating existing sessions
+  ansible.builtin.include_tasks: set_servers.yml
+  vars:
+    haproxy_state_nodes: "{{ runtime_sites[runtime_source_dc] }}"
+    haproxy_state_desired: drain
+  when: runtime_mode == 'planned'
+
+- name: Wait for source sessions to drain within the timeout
+  ansible.builtin.command:
+    argv:
+      - bash
+      - "-s"
+      - "--"
+      - "{{ haproxy_state_socket }}"
+      - "{{ haproxy_state_backend }}"
+      - "{{ runtime_sites[runtime_source_dc][0].server }}"
+      - "{{ runtime_sites[runtime_source_dc][1].server }}"
+      - "{{ runtime_drain_timeout_seconds }}"
+      - "{{ runtime_drain_threshold }}"
+      - "{{ runtime_health_delay_seconds }}"
+    stdin: "{{ lookup('ansible.builtin.file', role_path ~ '/files/wait-for-drain.sh') }}"
+  register: haproxy_state_drain
+  changed_when: false
+  when: runtime_mode == 'planned'
+
+- name: Record drain outcome
+  ansible.builtin.set_fact:
+    haproxy_state_drain_result:
+      mode: "{{ runtime_mode }}"
+      initial_connections: "{{ runtime_initial_connections }}"
+      remaining_connections: >-
+        {{ (haproxy_state_drain.stdout | from_json).remaining_connections
+           if runtime_mode == 'planned' else 'skipped-source-unavailable' }}
+      elapsed_seconds: "{{ (haproxy_state_drain.stdout | from_json).elapsed_seconds if runtime_mode == 'planned' else 0 }}"
+
+- name: Disable source servers without killing established sessions
+  ansible.builtin.include_tasks: set_servers.yml
+  vars:
+    haproxy_state_nodes: "{{ runtime_sites[runtime_source_dc] }}"
+    haproxy_state_desired: disabled

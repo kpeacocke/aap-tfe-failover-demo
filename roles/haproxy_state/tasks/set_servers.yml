@@ -1,0 +1,14 @@
+---
+- name: Set HAProxy runtime server state
+  community.general.haproxy:
+    socket: "{{ haproxy_state_socket }}"
+    backend: "{{ haproxy_state_backend }}"
+    host: "{{ item.server }}"
+    state: "{{ haproxy_state_desired }}"
+    fail_on_not_found: true
+    wait: "{{ haproxy_state_desired == 'enabled' }}"
+    wait_interval: "{{ runtime_health_delay_seconds }}"
+    wait_retries: "{{ runtime_health_retries }}"
+  loop: "{{ haproxy_state_nodes }}"
+  loop_control:
+    label: "{{ item.server }} -> {{ haproxy_state_desired }}"

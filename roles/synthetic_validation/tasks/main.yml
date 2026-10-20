@@ -1,0 +1,110 @@
+---
+- name: Recheck every node in the active datacentre
+  ansible.builtin.include_role:
+    name: application_health
+  vars:
+    application_health_dc: "{{ synthetic_validation_active_dc }}"
+    application_health_nodes: "{{ runtime_sites[synthetic_validation_active_dc] }}"
+    application_health_required: true
+
+- name: Inspect the runtime state before external validation
+  ansible.builtin.include_role:
+    name: haproxy_state
+
+- name: Require target UP and source in maintenance
+  ansible.builtin.assert:
+    that:
+      - >-
+        haproxy_state_servers | selectattr('svname', 'in', runtime_sites[synthetic_validation_active_dc] | map(attribute='server') | list)
+        | map(attribute='status') | unique | list == ['UP']
+      - >-
+        haproxy_state_servers | selectattr('svname', 'in', runtime_sites[synthetic_validation_inactive_dc] | map(attribute='server') | list)
+        | map(attribute='status') | unique | list == ['MAINT']
+    fail_msg: HAProxy runtime state does not match the requested active and standby datacentres.
+
+- name: Record source request counter before external requests
+  ansible.builtin.set_fact:
+    synthetic_validation_source_requests: >-
+      {{ haproxy_state_servers
+         | selectattr('svname', 'in', runtime_sites[synthetic_validation_inactive_dc] | map(attribute='server') | list)
+         | map(attribute='stot') | map('int') | sum }}
+
+- name: Wait for the front door to report the target datacentre
+  ansible.builtin.uri:
+    url: "{{ runtime_frontdoor_url }}/health"
+    return_content: true
+    timeout: 5
+    use_proxy: false
+  delegate_to: localhost
+  become: false
+  register: synthetic_validation_ready
+  until: >-
+    synthetic_validation_ready.status | default(-1) == 200 and
+    synthetic_validation_ready.json.status | default('') == 'healthy' and
+    synthetic_validation_ready.json.datacentre | default('') == synthetic_validation_active_dc
+  retries: "{{ runtime_health_retries }}"
+  delay: "{{ runtime_health_delay_seconds }}"
+
+- name: Require every sampled front-door request to reach a healthy target node
+  ansible.builtin.uri:
+    url: "{{ runtime_frontdoor_url }}/health"
+    return_content: true
+    timeout: 5
+    use_proxy: false
+  delegate_to: localhost
+  become: false
+  loop: "{{ range(0, runtime_validation_samples | int) | list }}"
+  register: synthetic_validation_requests
+  failed_when: >-
+    synthetic_validation_requests.status | default(-1) != 200 or
+    synthetic_validation_requests.json.status | default('') != 'healthy' or
+    synthetic_validation_requests.json.datacentre | default('') != synthetic_validation_active_dc or
+    synthetic_validation_requests.json.version | default('') != runtime_application_version or
+    synthetic_validation_requests.json.hostname | default('') not in
+    runtime_sites[synthetic_validation_active_dc] | map(attribute='hostname') | list
+
+- name: Require both target nodes to have served traffic
+  ansible.builtin.assert:
+    that:
+      - >-
+        synthetic_validation_requests.results | map(attribute='json.hostname') | unique | sort ==
+        runtime_sites[synthetic_validation_active_dc] | map(attribute='hostname') | sort
+    fail_msg: Repeated front-door requests did not reach both expected target nodes.
+
+- name: Verify the customer-facing page as a synthetic read transaction
+  ansible.builtin.uri:
+    url: "{{ runtime_frontdoor_url }}/"
+    return_content: true
+    timeout: 5
+    use_proxy: false
+  delegate_to: localhost
+  become: false
+  register: synthetic_validation_page
+  failed_when: >-
+    synthetic_validation_page.status | default(-1) != 200 or
+    '<h1>Datacentre Failover Demo</h1>' not in synthetic_validation_page.content | default('') or
+    ('>' ~ synthetic_validation_active_dc | upper ~ '<') not in synthetic_validation_page.content | default('')
+
+- name: Inspect source request counter after validation
+  ansible.builtin.include_role:
+    name: haproxy_state
+
+- name: Require no new source sessions during validation
+  ansible.builtin.assert:
+    that:
+      - >-
+        haproxy_state_servers
+        | selectattr('svname', 'in', runtime_sites[synthetic_validation_inactive_dc] | map(attribute='server') | list)
+        | map(attribute='stot') | map('int') | sum == synthetic_validation_source_requests | int
+    fail_msg: Source servers received new sessions during external validation.
+
+- name: Publish structured service validation
+  ansible.builtin.set_fact:
+    synthetic_validation_result:
+      result: pass
+      expected_dc: "{{ synthetic_validation_active_dc }}"
+      observed_hosts: "{{ synthetic_validation_requests.results | map(attribute='json.hostname') | unique | list }}"
+      target_nodes_healthy: "{{ application_health_healthy | length }}"
+      external_endpoint: pass
+      source_new_requests: 0
+      synthetic_transaction: pass

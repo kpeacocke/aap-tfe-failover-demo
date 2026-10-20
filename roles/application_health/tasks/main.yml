@@ -1,0 +1,47 @@
+---
+- name: Check application identity from HAProxy
+  ansible.builtin.uri:
+    url: "{{ item.health_url }}"
+    return_content: true
+    timeout: 5
+    use_proxy: false
+  loop: "{{ application_health_nodes }}"
+  loop_control:
+    label: "{{ item.hostname }}"
+  register: application_health_requests
+  failed_when: false
+  changed_when: false
+
+- name: Classify healthy application nodes
+  ansible.builtin.set_fact:
+    application_health_healthy: []
+
+- name: Collect nodes with the expected health and identity
+  ansible.builtin.set_fact:
+    application_health_healthy: "{{ application_health_healthy + [item.item.hostname] }}"
+  loop: "{{ application_health_requests.results }}"
+  loop_control:
+    label: "{{ item.item.hostname }}"
+  when:
+    - item.status | default(-1) == 200
+    - item.json is defined
+    - item.json.status | default('') == 'healthy'
+    - item.json.datacentre | default('') == application_health_dc
+    - item.json.hostname | default('') == item.item.hostname
+    - item.json.version | default('') == runtime_application_version
+
+- name: Require every application node to be healthy
+  ansible.builtin.assert:
+    that:
+      - application_health_healthy | length == application_health_nodes | length
+    fail_msg: >-
+      {{ application_health_dc }} is not ready: {{ application_health_healthy | length }}/{{ application_health_nodes | length }}
+      nodes match the required health, datacentre, hostname and version {{ runtime_application_version }}.
+      Inspect application_health_requests for individual responses. Traffic has not been changed by this health check.
+  when: application_health_required | default(true) | bool
+
+- name: Report observed application health
+  ansible.builtin.debug:
+    msg: >-
+      {{ application_health_dc | upper }} health: {{ application_health_healthy | length }}/{{ application_health_nodes | length }}
+      nodes match the expected identity and version {{ runtime_application_version }}.
