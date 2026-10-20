@@ -475,6 +475,11 @@ bash scripts/aap-configure.sh portal-verify
 ```
 
 The install creates a demo OAuth client and preserves its secret in OpenShift.
+It saves the one-time OAuth credentials before configuring other AAP objects;
+repeat runs reuse them and the scoped service tokens. If an interrupted run
+saved OAuth credentials but not the catalog token, the next run resumes without
+rotating the client. The existing demo project is synchronized before launcher
+playbooks are configured.
 Portal users sign in with their existing AAP account; no token form or
 administrator credential is exposed. Only **Datacentre Failover** and
 **Recover Datacentre** are registered. Automatic internal-job publication is

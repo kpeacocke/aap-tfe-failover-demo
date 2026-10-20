@@ -42,3 +42,4 @@
           - demo_portal_test_aap.controller_roles[0].role == 'execute'
           - demo_portal_test_aap.controller_roles[0].users == ['ww-demo-portal-runner']
           - demo_portal_test_aap.controller_roles[0].workflows | sort == ['Demo - Datacentre Failover', 'Demo - Datacentre Recovery']
+          - "'controller_applications' in demo_portal_test_aap.aap_configuration_dispatcher_exclude_roles"

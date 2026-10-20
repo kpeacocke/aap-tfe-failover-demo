@@ -1915,8 +1915,8 @@ support remain unchanged. Operational Terraform and AAP connections retained
 TLS verification. The Snyk code scan tool is unavailable, so no successful
 Snyk scan is claimed.
 
-Phase 4 is complete. Phase 5 (Portal on the existing OpenShift cluster) is next
-and has not been implemented or configured.
+Phase 4 is complete. Phase 5 (Portal on the existing OpenShift cluster) is
+being implemented and is not yet accepted as complete.
 
 ## Phase 5
 
@@ -1953,6 +1953,17 @@ access to these two launchers, not the individual stages or setup jobs.
 Catalog synchronization uses a separate read-scoped token belonging to a
 demo-organization administrator. OAuth client secrets and reusable service
 credentials persist only in namespaced Secrets/AAP credentials.
+
+The certified `ansible.platform.application` action returns synchronously even
+when invoked by the dispatcher's asynchronous Gateway role. Bootstrap consumes
+the verified role result when no async registration exists and persists the
+one-time client secret immediately, before configuring other objects. The
+legacy `controller_applications` role is excluded: OAuth belongs to Gateway in
+AAP 2.7. An interrupted partial connection Secret resumes by creating only its
+missing catalog token; existing OAuth credentials and tokens are reused.
+The token module's published authentication fact is reset to the supplied
+administrator authentication before reconciling launcher resources. The
+existing demo SCM project is synchronized before checking the new playbook.
 
 Only the two custom Git-backed templates are registered; automatic job-template
 catalog synchronization is disabled to avoid publishing the internal stages.

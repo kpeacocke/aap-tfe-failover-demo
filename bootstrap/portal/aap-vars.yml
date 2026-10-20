@@ -1,5 +1,6 @@
 ---
 aap_configuration_secure_logging: true
+aap_configuration_dispatcher_exclude_roles: [controller_applications]
 aap_applications:
   - name: Demo | Portal OAuth
     organization: "{{ demo_portal_organization }}"

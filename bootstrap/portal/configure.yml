@@ -1,4 +1,17 @@
 ---
+- name: Synchronize the existing demo project before validating new launcher playbooks
+  ansible.controller.project_update:
+    name: Demo | Datacentre Failover
+    organization: "{{ demo_portal_organization }}"
+    wait: true
+    timeout: 600
+    controller_host: "{{ aap_hostname }}"
+    controller_username: "{{ aap_username }}"
+    controller_password: "{{ aap_password }}"
+    controller_oauthtoken: "{{ aap_token | default(omit, true) }}"
+    validate_certs: "{{ aap_validate_certs }}"
+  no_log: true
+
 - name: Load declarative launcher resources without touching workflow stages
   ansible.builtin.include_vars: launcher-vars.yml
 
