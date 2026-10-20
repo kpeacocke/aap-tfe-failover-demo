@@ -1,0 +1,3 @@
+---
+- name: Record successful recovery without switchback
+  ansible.builtin.include_tasks: evidence_success.yml

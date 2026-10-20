@@ -310,6 +310,132 @@ automatically clear locks after errors. Coordinate with other Terraform users:
 the HAProxy marker serializes these CLIs, not outside administrators, and the
 normal Terraform unlock API has no atomic lock-reason comparison.
 
+## Phase 4: AAP workflows on the existing RHDP platform
+
+Phase 4 adds demo-specific configuration to the **existing AAP 2.7 instance**.
+It never installs or upgrades AAP or OpenShift. Portal remains Phase 5.
+The repository is public, so AAP project checkout needs no GitHub credential.
+
+The configuration follows the `ansible/product-demos` pattern: environment-based
+authentication, a required gateway version check, common bootstrap variables,
+and separate demo variables reconciled by `infra.aap_configuration.dispatch`
+4.10.0. The module fields were checked against the installed collection and the
+certified modules in the existing Product Demos EE.
+
+The RHDP Product Demos image does not contain the SDK versions validated in
+Phase 3. A dedicated, prefixed image extends that existing AAP-compatible image
+with the pinned Python/collection dependencies. OpenShift builds it in
+`ww-demo-execution` and stores it in the existing internal registry. Only that
+image namespace grants AAP service accounts pull access; existing execution
+environments and cluster-wide platform configuration are not replaced.
+The AAP reference uses the resulting immutable image digest.
+
+### Configure AAP
+
+Set these in the private `.env`:
+
+- `AAP_HOSTNAME`: the RHDP Controller Console URL's HTTPS base URL, without UI
+  paths; plus `AAP_TOKEN` or `AAP_USERNAME` and `AAP_PASSWORD`.
+- `OPENSHIFT_API_URL` and `OPENSHIFT_TOKEN`: access to the existing RHDP cluster
+  for the image build. `AAP_OPENSHIFT_NAMESPACE` defaults to `aap`.
+- Keep TLS verification enabled. For a private OpenShift CA, set
+  `OPENSHIFT_CA_CERT` to a trusted CA file. Set `OPENSHIFT_VALIDATE_CERTS=false`
+  only after explicitly accepting the risk for a disposable lab.
+- Existing Terraform API, AWS account/region, demo SSH key and front-door
+  settings from provisioning. Bootstrap extracts only the previously verified
+  HAProxy entry from your SSH `known_hosts`; it never trusts a fresh key scan.
+
+Docker is required for the local configuration wrapper. It builds a local copy
+of the same EE so certified Ansible collections do not need to be downloaded
+from a separately authenticated Automation Hub. Secret values are passed by
+environment, never committed or written into the execution image.
+
+After publishing this code to the configured Git revision:
+
+```bash
+bash scripts/aap-configure.sh check
+bash scripts/aap-configure.sh inspect
+bash scripts/aap-configure.sh inspect-openshift
+# Builds the current local Git commit; push it before running this command.
+bash scripts/aap-configure.sh build-ee
+# Copy the reported immutable DEMO_EE_IMAGE reference into .env.
+bash scripts/aap-configure.sh install
+bash scripts/aap-configure.sh readiness
+```
+
+Copy the readiness job's verified `TF_VAR_aap_ssh_cidr` `/32` into `.env`, then
+apply **only the shared root** to add that narrowly scoped HAProxy SSH source:
+
+```bash
+bash scripts/terraform.sh shared plan
+bash scripts/terraform.sh shared apply
+```
+
+Your existing presenter SSH rule is preserved. Application nodes still have no
+SSH ingress. Never substitute `0.0.0.0/0` when execution-pod egress is unknown.
+If cluster egress changes, rerun readiness and reconcile the shared root.
+
+`install` establishes common demo resources and then the two workflows.
+`setup` reconciles only the demo stage templates, workflow graphs and
+execute-only grants. A separate administrator-only `Demo | Setup` AAP job runs
+the same demo reconciliation in-platform. Credentials use `update_secrets:
+false`; edit/rotate them deliberately rather than expecting reconciliation to
+overwrite stored secrets. Lab AWS credentials retain their original IAM
+permissions, but these workflows issue only STS identity and EC2 describe
+requests; no AWS mutation or infrastructure provisioning is performed by AAP.
+
+### Run and inspect the AAP graph
+
+AAP exposes **Demo - Datacentre Failover** and **Demo - Datacentre Recovery**.
+The survey accepts only service, datacentre, reason, reference and confirmation
+as appropriate. It does not permit inventory, playbook, credential, branch,
+limit or arbitrary variable overrides.
+
+Failover uses separate jobs for request validation, actual-state discovery,
+target validation (including AWS running state), quarantine, drain, activation,
+service validation and evidence. Failures after traffic mutation enter a
+health-gated recovery decision and then a failing evidence job: even a
+successful traffic rollback does not turn a failed failover into success or
+release quarantine.
+
+Each job invokes one reusable role task set through the common stage
+entrypoint. State is persisted in the owned HAProxy marker, not assumed to
+survive in process-local facts. Each stage verifies workflow ID, reference,
+stage order, source revision and unchanged topology. A cancelled or unreachable
+job can leave a marker: inspect actual state and the owning AAP workflow before
+an administrator removes it. Never remove another workflow's marker.
+
+Recovery checks infrastructure, applications, network/standby isolation and
+Terraform API health/lock ownership before normal unlock, then validates the
+unchanged active service. The Terraform step is a read-only API/output health
+check, not an unlocked plan or an infrastructure repair. Recovery **never
+automatically switches traffic back**.
+
+Administrative CLI equivalents launch the same AAP workflows:
+
+```bash
+bash scripts/aap-configure.sh failover dc2 CHG0012345
+bash scripts/aap-configure.sh recovery dc1 CHG0012345
+bash scripts/aap-configure.sh failover dc1 CHG0012346
+bash scripts/aap-configure.sh recovery dc2 CHG0012346
+```
+
+Each stage has retained job output and non-secret Controller artifacts.
+The final evidence job publishes the machine-readable `demo_workflow_result` artifact,
+including workflow/reference, sites, outcome, drain result, observed lock
+state, validation and timestamps. Use the workflow's graph and child jobs to
+inspect a failure; never clear locks automatically after a CLI timeout.
+
+### Restricted execution
+
+`ww-demo-operator` belongs to `Demo | Failover Operators`. The team receives
+execute access only to the two workflow templates, not their underlying stage
+jobs, setup/readiness jobs, inventory administration or credentials. Bootstrap
+generates/reuses a password in ignored `.local/aap-operator-password`, unless
+`DEMO_OPERATOR_PASSWORD` is supplied. Keep it private. Portal publication and
+its restricted-user front door are still Phase 5; this phase does not claim
+Portal access or Portal-only authentication has been configured.
+
 ## Validate locally
 
 ```bash
@@ -329,6 +455,7 @@ shellcheck scripts/*.sh terraform/shared/set-active-datacentre.sh tests/*.sh tes
 # Requires Docker; disposable local fixture, no .env, cloud credentials or AWS changes.
 bash tests/test-runtime.sh
 bash tests/test-terraform-api.sh
+bash tests/test-aap-config.sh
 ```
 
 The runtime fixture uses real HAProxy and four copies of the demo application.
@@ -343,6 +470,12 @@ The separate TLS JSON:API fixture tests use the
 real pinned HashiCorp collection and Python SDK to cover authentication,
 output processing/validation, incident ownership, permissions, API conflicts
 and idempotent normal lock/unlock. Neither fixture mounts lab credentials.
+The runtime fixture also executes each AAP stage in a separate Ansible process,
+using protocol-level TLS Terraform/AWS fixtures with real collection modules.
+It checks successful failover/recovery, marker ownership, refusal to skip
+stages and failed-workflow rollback semantics. The configuration test renders
+all stage templates and verifies fixed credentials, restricted surveys and
+execute-only workflow grants without any platform credentials.
 
 The Terraform validation initializes providers but does not contact AWS or
 create infrastructure. Applying the configuration creates billable AWS

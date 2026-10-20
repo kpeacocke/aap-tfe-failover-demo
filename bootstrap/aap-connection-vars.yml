@@ -1,0 +1,6 @@
+---
+aap_hostname: "{{ lookup('ansible.builtin.env', 'AAP_HOSTNAME') | regex_replace('/$', '') }}"
+aap_username: "{{ lookup('ansible.builtin.env', 'AAP_USERNAME') }}"
+aap_password: "{{ lookup('ansible.builtin.env', 'AAP_PASSWORD') }}"
+aap_token: "{{ lookup('ansible.builtin.env', 'AAP_TOKEN') }}"
+aap_validate_certs: "{{ lookup('ansible.builtin.env', 'AAP_VALIDATE_CERTS') | default('true', true) | bool }}"

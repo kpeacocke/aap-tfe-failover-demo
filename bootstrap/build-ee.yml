@@ -1,0 +1,165 @@
+---
+- name: Build only the demo execution image on the existing OpenShift cluster
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    demo_openshift_api: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_API_URL') | regex_replace('/$', '') }}"
+    demo_openshift_token: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_TOKEN') }}"
+    demo_ee_namespace: ww-demo-execution
+    demo_aap_namespace: "{{ lookup('ansible.builtin.env', 'AAP_OPENSHIFT_NAMESPACE') | default('aap', true) }}"
+    demo_source_revision: "{{ lookup('ansible.builtin.env', 'DEMO_EE_SOURCE_REVISION') }}"
+    demo_ee_source: https://github.com/kpeacocke/aap-tfe-failover-demo.git
+  module_defaults:
+    group/kubernetes.core.k8s:
+      host: "{{ demo_openshift_api }}"
+      api_key: "{{ demo_openshift_token }}"
+      validate_certs: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_VALIDATE_CERTS') | default('true', true) | bool }}"
+      ca_cert: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_CA_CERT') | default(omit, true) }}"
+  tasks:
+    - name: Require existing cluster access
+      ansible.builtin.assert:
+        that:
+          - demo_openshift_api is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?$')
+          - demo_openshift_token | length > 0
+          - demo_source_revision is match('^[a-f0-9]{40}$')
+      no_log: true
+
+    - name: Reconcile the dedicated execution-image namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ demo_ee_namespace }}"
+            labels:
+              app.kubernetes.io/managed-by: aap-tfe-failover-demo
+
+    - name: Reconcile the demo image stream
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: image.openshift.io/v1
+          kind: ImageStream
+          metadata:
+            name: ww-demo-ee
+            namespace: "{{ demo_ee_namespace }}"
+            labels:
+              app.kubernetes.io/managed-by: aap-tfe-failover-demo
+
+    - name: Reconcile the demo build configuration
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: build.openshift.io/v1
+          kind: BuildConfig
+          metadata:
+            name: ww-demo-ee
+            namespace: "{{ demo_ee_namespace }}"
+            labels:
+              app.kubernetes.io/managed-by: aap-tfe-failover-demo
+          spec:
+            runPolicy: Serial
+            successfulBuildsHistoryLimit: 2
+            failedBuildsHistoryLimit: 2
+            source:
+              type: Git
+              git:
+                uri: "{{ demo_ee_source }}"
+                ref: "{{ demo_source_revision }}"
+            strategy:
+              type: Docker
+              dockerStrategy:
+                dockerfilePath: execution-environment/Containerfile
+            output:
+              to:
+                kind: ImageStreamTag
+                name: ww-demo-ee:phase4
+            triggers: []
+      register: demo_ee_build_config
+
+    - name: Inspect existing completed image
+      kubernetes.core.k8s_info:
+        api_version: image.openshift.io/v1
+        kind: ImageStreamTag
+        namespace: "{{ demo_ee_namespace }}"
+        name: ww-demo-ee:phase4
+      register: demo_ee_existing_image
+
+    - name: Start a build when the image is missing or configuration changed
+      ansible.builtin.uri:
+        url: "{{ demo_openshift_api }}/apis/build.openshift.io/v1/namespaces/{{ demo_ee_namespace }}/buildconfigs/ww-demo-ee/instantiate"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ demo_openshift_token }}"
+        body_format: json
+        body:
+          apiVersion: build.openshift.io/v1
+          kind: BuildRequest
+          metadata:
+            name: ww-demo-ee
+        status_code: [200, 201]
+        validate_certs: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_VALIDATE_CERTS') | default('true', true) | bool }}"
+        ca_path: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_CA_CERT') | default(omit, true) }}"
+        follow_redirects: none
+        unredirected_headers: [Authorization]
+        timeout: 30
+      register: demo_ee_build
+      no_log: true
+      when: demo_ee_build_config.changed or demo_ee_existing_image.resources | length == 0
+
+    - name: Wait for the requested build to finish
+      kubernetes.core.k8s_info:
+        api_version: build.openshift.io/v1
+        kind: Build
+        namespace: "{{ demo_ee_namespace }}"
+        name: "{{ demo_ee_build.json.metadata.name }}"
+      register: demo_ee_build_status
+      until: >-
+        demo_ee_build_status.resources | length == 1 and
+        demo_ee_build_status.resources[0].status.phase in ['Complete', 'Failed', 'Error', 'Cancelled']
+      retries: 120
+      delay: 10
+      when: demo_ee_build is not skipped
+
+    - name: Require a successful image build
+      ansible.builtin.assert:
+        that:
+          - demo_ee_build_status.resources[0].status.phase == 'Complete'
+        fail_msg: "Demo image build failed. Inspect build logs in {{ demo_ee_namespace }}; no AAP execution environment was replaced."
+      when: demo_ee_build is not skipped
+
+    - name: Allow AAP service accounts to pull only from the demo image namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: RoleBinding
+          metadata:
+            name: ww-demo-aap-image-pull
+            namespace: "{{ demo_ee_namespace }}"
+            labels:
+              app.kubernetes.io/managed-by: aap-tfe-failover-demo
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: system:image-puller
+          subjects:
+            - apiGroup: rbac.authorization.k8s.io
+              kind: Group
+              name: "system:serviceaccounts:{{ demo_aap_namespace }}"
+
+    - name: Read the published image digest
+      kubernetes.core.k8s_info:
+        api_version: image.openshift.io/v1
+        kind: ImageStreamTag
+        namespace: "{{ demo_ee_namespace }}"
+        name: ww-demo-ee:phase4
+      register: demo_ee_published
+
+    - name: Report the immutable demo image reference for AAP
+      ansible.builtin.debug:
+        msg: >-
+          DEMO_EE_IMAGE=image-registry.openshift-image-registry.svc:5000/{{ demo_ee_namespace }}/ww-demo-ee@{{
+          demo_ee_published.resources[0].image.metadata.name }}

@@ -1,0 +1,157 @@
+---
+demo_aap_organization: Demo | Datacentre Failover
+demo_aap_inventory: Demo | Runtime
+demo_aap_project: Demo | Datacentre Failover
+demo_aap_ee: Demo | Failover Execution Environment
+demo_aap_ee_image: "{{ lookup('ansible.builtin.env', 'DEMO_EE_IMAGE') }}"
+demo_aap_scm_revision: "{{ lookup('ansible.builtin.env', 'DEMO_SCM_REVISION') | default('main', true) }}"
+aap_configuration_secure_logging: true
+controller_configuration_projects_async_retries: 120
+
+aap_organizations:
+  - name: "{{ demo_aap_organization }}"
+    description: Demo-managed datacentre failover content; does not alter RHDP platform configuration.
+
+aap_teams:
+  - name: Demo | Failover Operators
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed workflow-execute-only operators; no credential or stage-template grants.
+
+aap_user_accounts:
+  - username: ww-demo-operator
+    email: ww-demo-operator@example.invalid
+    password: "{{ lookup('ansible.builtin.env', 'DEMO_OPERATOR_PASSWORD') }}"
+    is_superuser: false
+    is_platform_auditor: false
+    update_secrets: false
+    organizations: ["{{ demo_aap_organization }}"]
+
+gateway_role_user_assignments:
+  - user: ww-demo-operator
+    role_definition: Team Member
+    object_ids:
+      - Demo | Failover Operators
+
+controller_execution_environments:
+  - name: "{{ demo_aap_ee }}"
+    organization: "{{ demo_aap_organization }}"
+    image: "{{ demo_aap_ee_image }}"
+    pull: always
+    description: Demo-managed pinned runtime dependencies, built on the existing RHDP OpenShift cluster.
+
+controller_credential_types:
+  - name: Demo | Runtime API
+    description: Demo-managed Terraform API, AWS identity guards and verified HAProxy SSH trust.
+    kind: cloud
+    inputs:
+      fields:
+        - {id: tfe_address, type: string, label: Terraform HTTPS address}
+        - {id: tfe_organization, type: string, label: Terraform organization}
+        - {id: tfe_token, type: string, label: Terraform API token, secret: true}
+        - {id: aws_region, type: string, label: Verified AWS region}
+        - {id: aws_account_id, type: string, label: Expected AWS account ID}
+        - {id: ssh_known_hosts, type: string, label: Verified HAProxy known_hosts entry, multiline: true}
+      required: [tfe_address, tfe_organization, tfe_token, aws_region, aws_account_id, ssh_known_hosts]
+    injectors:
+      file:
+        template: !unsafe "{{ ssh_known_hosts }}"
+      env:
+        TFE_ADDRESS: !unsafe "{{ tfe_address }}"
+        TFE_TOKEN: !unsafe "{{ tfe_token }}"
+        HCP_TERRAFORM_ORGANIZATION: !unsafe "{{ tfe_organization }}"
+        AWS_REGION: !unsafe "{{ aws_region }}"
+        AWS_DEFAULT_REGION: !unsafe "{{ aws_region }}"
+        DEMO_AWS_ACCOUNT_ID: !unsafe "{{ aws_account_id }}"
+        DEMO_SSH_KNOWN_HOSTS_FILE: !unsafe "{{ tower.filename }}"
+
+controller_credentials:
+  - name: Demo | Terraform API
+    organization: "{{ demo_aap_organization }}"
+    credential_type: Demo | Runtime API
+    description: Demo-managed operational API access; credentials are not visible to workflow consumers.
+    update_secrets: false
+    inputs:
+      tfe_address: "{{ lookup('ansible.builtin.env', 'TFE_ADDRESS') | default('https://app.terraform.io', true) }}"
+      tfe_organization: "{{ lookup('ansible.builtin.env', 'HCP_TERRAFORM_ORGANIZATION') }}"
+      tfe_token: "{{ lookup('ansible.builtin.env', 'TFE_TOKEN') | default(lookup('ansible.builtin.env', 'TF_TOKEN_app_terraform_io'), true) }}"
+      aws_region: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_region') }}"
+      aws_account_id: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_account_id') }}"
+      ssh_known_hosts: "{{ demo_verified_known_hosts.stdout_lines | reject('match', '^#') | join('\n') }}"
+  - name: Demo | HAProxy SSH
+    organization: "{{ demo_aap_organization }}"
+    credential_type: Machine
+    description: Demo-managed HAProxy operational key; no SSH access to application nodes.
+    update_secrets: false
+    inputs:
+      username: ec2-user
+      ssh_key_data: "{{ lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'DEMO_BOOTSTRAP_KEY_FILE')) }}"
+  - name: Demo | AWS Health Read
+    organization: "{{ demo_aap_organization }}"
+    credential_type: Amazon Web Services
+    description: Demo-managed read-only workflow operations; EC2 describe and STS identity only.
+    update_secrets: false
+    inputs:
+      username: "{{ lookup('ansible.builtin.env', 'AWS_ACCESS_KEY_ID') }}"
+      password: "{{ lookup('ansible.builtin.env', 'AWS_SECRET_ACCESS_KEY') }}"
+      security_token: "{{ lookup('ansible.builtin.env', 'AWS_SESSION_TOKEN') | default(omit, true) }}"
+  - name: Demo | AAP Reconcile
+    organization: "{{ demo_aap_organization }}"
+    credential_type: Red Hat Ansible Automation Platform
+    description: Demo-managed administrative reconciliation; never attached to consumer workflows.
+    update_secrets: false
+    inputs:
+      host: "{{ aap_hostname }}"
+      username: "{{ aap_username | default(omit, true) }}"
+      password: "{{ aap_password | default(omit, true) }}"
+      oauth_token: "{{ aap_token | default(omit, true) }}"
+      verify_ssl: "{{ aap_validate_certs }}"
+      request_timeout: "30"
+
+controller_projects:
+  - name: "{{ demo_aap_project }}"
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed public source; no GitHub credential is needed.
+    scm_type: git
+    scm_url: https://github.com/kpeacocke/aap-tfe-failover-demo.git
+    scm_branch: "{{ demo_aap_scm_revision }}"
+    scm_update_on_launch: true
+    scm_update_cache_timeout: 60
+    allow_override: false
+    default_environment: "{{ demo_aap_ee }}"
+    wait: true
+
+controller_inventories:
+  - name: "{{ demo_aap_inventory }}"
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed controller entrypoint; runtime topology is discovered from Terraform outputs in each stage.
+
+controller_hosts:
+  - name: localhost
+    inventory: "{{ demo_aap_inventory }}"
+    variables:
+      ansible_connection: local
+      ansible_python_interpreter: /usr/bin/python3.12
+
+controller_templates:
+  - name: Demo | Setup
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed administrator-only in-platform workflow reconciliation.
+    project: "{{ demo_aap_project }}"
+    inventory: "{{ demo_aap_inventory }}"
+    execution_environment: "{{ demo_aap_ee }}"
+    playbook: bootstrap/setup-demo.yml
+    credentials: [Demo | AAP Reconcile]
+    ask_variables_on_launch: false
+    allow_simultaneous: false
+    timeout: 1800
+  - name: Demo | EE Readiness
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed administrator-only API/dependency and execution-egress check.
+    project: "{{ demo_aap_project }}"
+    inventory: "{{ demo_aap_inventory }}"
+    execution_environment: "{{ demo_aap_ee }}"
+    playbook: playbooks/aap/readiness.yml
+    credentials: [Demo | Terraform API, Demo | AWS Health Read]
+    ask_variables_on_launch: false
+    allow_simultaneous: false
+    timeout: 600

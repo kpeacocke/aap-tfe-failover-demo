@@ -1,0 +1,4 @@
+---
+- name: Require the recovered site to remain standby and validate active service
+  ansible.builtin.include_role:
+    name: synthetic_validation

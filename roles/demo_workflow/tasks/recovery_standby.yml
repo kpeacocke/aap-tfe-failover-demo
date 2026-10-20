@@ -1,0 +1,3 @@
+---
+- name: Require recovered site still in standby without automatic switchback
+  ansible.builtin.include_tasks: recovery_network.yml

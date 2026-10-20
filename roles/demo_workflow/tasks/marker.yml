@@ -1,0 +1,65 @@
+---
+- name: Validate the restricted request before creating a marker
+  ansible.builtin.assert:
+    that:
+      - demo_service | default('') == 'Customer Orders Demo'
+      - demo_reference | default('') is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+      - demo_confirmation | default('') == 'CONFIRM'
+      - demo_target | default('') in ['dc1', 'dc2'] if demo_stage == 'validate_request' else demo_recovery_dc | default('') in ['dc1', 'dc2']
+      - demo_reason | default('') in demo_workflow_allowed_reasons if demo_stage == 'validate_request' else true
+    fail_msg: Supply the approved service, datacentre, reason, reference and explicit confirmation.
+  when: demo_stage in ['validate_request', 'recovery_request']
+
+- name: Acquire a marker without overwriting another operation
+  ansible.builtin.command:
+    argv: [mkdir, "{{ runtime_operation_marker }}"]
+  changed_when: true
+  when: demo_stage in ['validate_request', 'recovery_request']
+
+- name: Initialize the authoritative workflow state
+  ansible.builtin.set_fact:
+    demo_workflow_state:
+      owner_id: "{{ demo_workflow_owner_id }}"
+      source_revision: "{{ awx_project_revision | default(tower_project_revision | default('local-test')) }}"
+      operation: "{{ 'failover' if demo_stage == 'validate_request' else 'recovery' }}"
+      reference: "{{ demo_reference }}"
+      target_dc: "{{ demo_target if demo_stage == 'validate_request' else ('dc2' if demo_recovery_dc == 'dc1' else 'dc1') }}"
+      source_dc: "{{ '' if demo_stage == 'validate_request' else demo_recovery_dc }}"
+      mode: "{{ 'failure' if demo_reason | default('') == 'Site failure' else 'planned' }}"
+      reason: "{{ demo_reason | default('Recovery') }}"
+      sites: "{{ runtime_sites }}"
+      frontdoor_url: "{{ runtime_frontdoor_url }}"
+      started_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      completed_stage: ""
+      traffic_mutation_started: false
+      outcome: in_progress
+  when: demo_stage in ['validate_request', 'recovery_request']
+
+- name: Read the marker from the previous isolated workflow job
+  ansible.builtin.slurp:
+    src: "{{ runtime_operation_marker }}/request.json"
+  register: demo_workflow_marker_file
+  when: demo_stage not in ['validate_request', 'recovery_request']
+
+- name: Restore only the marker's authoritative state
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_marker_file.content | b64decode | from_json }}"
+  when: demo_stage not in ['validate_request', 'recovery_request']
+
+- name: Require this workflow's ownership and unchanged Terraform topology
+  ansible.builtin.assert:
+    that:
+      - demo_workflow_state.owner_id | string == demo_workflow_owner_id
+      - demo_workflow_state.source_revision == awx_project_revision | default(tower_project_revision | default('local-test'))
+      - demo_workflow_state.reference == demo_reference
+      - demo_workflow_state.sites == runtime_sites
+      - demo_workflow_state.frontdoor_url == runtime_frontdoor_url
+      - demo_stage not in demo_workflow_predecessors or demo_workflow_state.completed_stage == demo_workflow_predecessors[demo_stage]
+    fail_msg: Marker ownership, stage order or topology changed. Stop; never remove another operation's marker or assume it completed.
+
+- name: Persist ownership before any later request validation can fail
+  ansible.builtin.copy:
+    dest: "{{ runtime_operation_marker }}/request.json"
+    mode: "0600"
+    content: "{{ demo_workflow_state | to_nice_json }}"
+  when: demo_stage in ['validate_request', 'recovery_request']

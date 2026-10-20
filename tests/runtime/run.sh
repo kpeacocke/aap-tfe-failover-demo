@@ -77,6 +77,7 @@ jq -n --arg socket "$fixture/admin.sock" --arg marker "$fixture/operation.lock" 
   def nodes($dc; $start):
     [range(0;2) as $i | {server:($dc+"_app_0"+(($i+1)|tostring)),
       hostname:($dc+"-app-0"+(($i+1)|tostring)),
+      instance_id:(if $i == 0 then "i-0123" else "i-0456" end),
       address:("127.0.0."+ (($start+$i)|tostring)),
       health_url:("http://127.0.0."+ (($start+$i)|tostring)+":8080/health")}];
   {all:{children:{haproxy:{hosts:{fixture:{
@@ -195,6 +196,7 @@ kill "$haproxy_pid"
 wait "$haproxy_pid" || test "$?" -eq 143
 for index in 1 2; do
     start_app "$index"
+    printf '%s\n' "$app_pid" > "$fixture/app-$index.pid"
 done
 sed 's/mode http/mode tcp/;s/timeout client 5s/timeout client 60s/;s/timeout server 5s/timeout server 60s/' \
     "$fixture/haproxy.cfg" > "$fixture/tcp.cfg"
@@ -296,3 +298,72 @@ PY
 exec 3<&-
 exec 3>&-
 echo "PASS: a failed API-integrated drain rolls back traffic but retains incident-owned source quarantine."
+
+curl --fail --silent --show-error --cacert "$SSL_CERT_FILE" -X POST \
+    -H "Authorization: Bearer $TFE_TOKEN" "$TFE_ADDRESS/api/v2/workspaces/ws-dc1/actions/unlock" > /dev/null
+export AWS_ACCESS_KEY_ID=fixture-access-key AWS_SECRET_ACCESS_KEY=fixture-secret
+export AWS_REGION=us-east-2 AWS_DEFAULT_REGION=us-east-2 DEMO_AWS_ACCOUNT_ID=123456789012
+export AWS_ENDPOINT_URL_STS="$TFE_ADDRESS/sts" AWS_ENDPOINT_URL_EC2="$TFE_ADDRESS/ec2"
+export AWS_CA_BUNDLE="$SSL_CERT_FILE" AWS_EC2_METADATA_DISABLED=true
+
+stage() {
+    local requested_stage=$1
+    shift
+    ansible-playbook -i "$fixture/inventory.json" tests/runtime/workflow-stage.yml \
+        -e "@$fixture/workspaces.json" -e "runtime_operation_marker=$fixture/operation.lock" \
+        -e demo_stage="$requested_stage" -e awx_workflow_job_id="${workflow_id:-9001}" \
+        -e '{"demo_service":"Customer Orders Demo","demo_reason":"Planned maintenance"}' \
+        -e demo_reference=TEST-WORKFLOW -e demo_confirmation=CONFIRM \
+        -e demo_target=dc2 -e demo_recovery_dc=dc1 \
+        -e runtime_health_delay_seconds=1 -e runtime_health_retries=3 "$@" \
+        > "$fixture/result.log" 2>&1
+}
+for step in validate_request determine_state validate_target quarantine_source drain_source activate_target validate_service evidence_success; do
+    if ! stage "$step"; then cat "$fixture/result.log"; exit 1; fi
+done
+require_active dc2
+grep -Fq '"outcome": "success"' "$fixture/result.log"
+workflow_id=9002
+for step in recovery_request recovery_infrastructure recovery_application recovery_network recovery_terraform_health \
+    recovery_unlock recovery_standby recovery_validation recovery_evidence; do
+    if ! stage "$step"; then cat "$fixture/result.log"; exit 1; fi
+done
+require_active dc2
+grep -Fq '"outcome": "success"' "$fixture/result.log"
+echo "PASS: separately executed AAP stage jobs fail over, retain quarantine and recover the standby without switchback."
+
+workflow_id=9003
+if stage validate_request; then echo "Already-active target unexpectedly accepted."; exit 1; fi
+test -d "$fixture/operation.lock"
+workflow_id=9004
+if stage evidence_failure; then echo "Another workflow stole the marker."; exit 1; fi
+grep -Fq 'Marker ownership' "$fixture/result.log"
+test -d "$fixture/operation.lock"
+workflow_id=9003
+if stage evidence_failure; then echo "Failure evidence converted failure into success."; exit 1; fi
+grep -Fq '"outcome": "failed"' "$fixture/result.log"
+require_active dc2
+echo "PASS: failed request evidence cleans only its own marker and another workflow cannot steal it."
+
+workflow_id=9005
+if ! stage validate_request -e demo_target=dc1; then cat "$fixture/result.log"; exit 1; fi
+if stage quarantine_source -e demo_target=dc1; then echo "Skipped workflow stages unexpectedly accepted."; exit 1; fi
+grep -Fq 'stage order' "$fixture/result.log"
+if stage evidence_failure -e demo_target=dc1; then echo "Out-of-order workflow unexpectedly succeeded."; exit 1; fi
+require_active dc2
+echo "PASS: isolated jobs cannot skip readiness stages before quarantine."
+
+workflow_id=9006
+for step in validate_request determine_state validate_target quarantine_source drain_source; do
+    if ! stage "$step" -e demo_target=dc1; then cat "$fixture/result.log"; exit 1; fi
+done
+kill "$(cat "$fixture/app-1.pid")"
+if stage activate_target -e demo_target=dc1; then echo "Unhealthy target unexpectedly activated."; exit 1; fi
+if ! stage rollback -e demo_target=dc1; then cat "$fixture/result.log"; exit 1; fi
+if stage evidence_failure -e demo_target=dc1; then echo "Rolled-back failover unexpectedly succeeded."; exit 1; fi
+grep -Fq '"outcome": "rolled_back"' "$fixture/result.log"
+grep -Fq '"locked": true' "$fixture/result.log"
+require_active dc2
+start_app 1
+printf '%s\n' "$app_pid" > "$fixture/app-1.pid"
+echo "PASS: AAP failure branches validate rollback, retain source quarantine and keep the workflow failed."

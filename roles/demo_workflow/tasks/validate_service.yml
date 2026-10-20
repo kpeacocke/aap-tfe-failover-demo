@@ -1,0 +1,8 @@
+---
+- name: Validate external traffic, both active nodes and source isolation
+  ansible.builtin.include_role:
+    name: synthetic_validation
+
+- name: Retain the structured validation result
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'validation': synthetic_validation_result}) }}"

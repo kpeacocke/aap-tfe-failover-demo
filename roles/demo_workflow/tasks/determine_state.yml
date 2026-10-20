@@ -1,0 +1,28 @@
+---
+- name: Rediscover actual runtime state
+  ansible.builtin.include_tasks: validate_request.yml
+
+- name: Pin the discovered source
+  ansible.builtin.set_fact:
+    demo_workflow_discovered_source: "{{ 'dc1' if demo_workflow_active_servers[0].svname in runtime_sites.dc1 | map(attribute='server') | list else 'dc2' }}"
+
+- name: Inspect source health without assuming rollback is possible
+  ansible.builtin.include_role:
+    name: application_health
+  vars:
+    application_health_dc: "{{ demo_workflow_discovered_source }}"
+    application_health_nodes: "{{ runtime_sites[demo_workflow_discovered_source] }}"
+    application_health_required: false
+
+- name: Require demonstrated source unavailability for failure mode
+  ansible.builtin.assert:
+    that:
+      - runtime_mode != 'failure' or application_health_requests.results | selectattr('status', 'equalto', 200) | list | length == 0
+    fail_msg: Source still responds; use a planned-maintenance reason rather than skipping graceful drain.
+
+- name: Record discovered runtime facts
+  ansible.builtin.set_fact:
+    demo_workflow_state: >-
+      {{ demo_workflow_state | combine({'source_dc': demo_workflow_discovered_source,
+         'source_reachable': application_health_healthy | length == 2,
+         'initial_connections': demo_workflow_active_servers | map(attribute='scur') | map('int') | sum}) }}

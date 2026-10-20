@@ -1,0 +1,12 @@
+---
+- name: Prepare the API-derived runtime host for this isolated stage
+  ansible.builtin.import_playbook: prepare.yml
+
+- name: Execute one approved reusable workflow stage
+  hosts: haproxy
+  gather_facts: false
+  become: true
+  vars_files:
+    - runtime-vars.yml
+  roles:
+    - demo_workflow

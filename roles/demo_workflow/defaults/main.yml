@@ -1,0 +1,23 @@
+---
+demo_workflow_owner_id: "{{ awx_workflow_job_id | default(tower_workflow_job_id) | string }}"
+demo_workflow_allowed_reasons:
+  - Site failure
+  - Planned maintenance
+  - Network degradation
+  - Disaster recovery test
+demo_workflow_predecessors:
+  determine_state: validate_request
+  validate_target: determine_state
+  quarantine_source: validate_target
+  drain_source: quarantine_source
+  activate_target: drain_source
+  validate_service: activate_target
+  evidence_success: validate_service
+  recovery_infrastructure: recovery_request
+  recovery_application: recovery_infrastructure
+  recovery_network: recovery_application
+  recovery_terraform_health: recovery_network
+  recovery_unlock: recovery_terraform_health
+  recovery_standby: recovery_unlock
+  recovery_validation: recovery_standby
+  recovery_evidence: recovery_validation

@@ -1,0 +1,51 @@
+---
+- name: Validate rendered demo configuration without credentials or platform access
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-demo-vars.yml
+  tasks:
+    - name: Require the complete reusable stage set
+      ansible.builtin.assert:
+        that:
+          - controller_templates | length == 19
+          - controller_templates | map(attribute='name') | unique | length == 19
+          - controller_workflows | length == 2
+          - controller_roles | length == 1
+          - controller_roles[0].role == 'execute'
+          - controller_roles[0].workflows | sort == controller_workflows | map(attribute='name') | sort
+
+    - name: Require fixed stage credentials and no launch-time override surface
+      ansible.builtin.assert:
+        that:
+          - not item.ask_variables_on_launch
+          - not item.ask_inventory_on_launch
+          - not item.ask_limit_on_launch
+          - not item.ask_scm_branch_on_launch
+          - not item.allow_simultaneous
+          - item.playbook == 'playbooks/aap/stage.yml'
+          - item.extra_vars.keys() | list == ['demo_stage']
+          - item.credentials | sort == ['Demo | AWS Health Read', 'Demo | HAProxy SSH', 'Demo | Terraform API']
+      loop: "{{ controller_templates }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Require restricted workflow surveys and complete node graphs
+      ansible.builtin.assert:
+        that:
+          - not item.ask_variables_on_launch
+          - not item.ask_inventory_on_launch
+          - not item.ask_limit_on_launch
+          - not item.ask_scm_branch_on_launch
+          - not item.allow_simultaneous
+          - item.survey_enabled
+          - item.simplified_workflow_nodes | length == 10
+          - item.simplified_workflow_nodes | map(attribute='identifier') | unique | length == 10
+          - >-
+            item.survey_spec.spec | map(attribute='variable') |
+            difference(['demo_service', 'demo_target', 'demo_recovery_dc',
+                        'demo_reason', 'demo_reference', 'demo_confirmation']) | length == 0
+      loop: "{{ controller_workflows }}"
+      loop_control:
+        label: "{{ item.name }}"

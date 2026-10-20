@@ -1,0 +1,35 @@
+---
+- name: Verify the pre-installed AAP platform
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Reconcile only common demo-owned AAP resources
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+    - aap-bootstrap-vars.yml
+  tasks:
+    - name: Require an immutable demo execution environment
+      ansible.builtin.assert:
+        that:
+          - demo_aap_ee_image is match('^[A-Za-z0-9./:_-]+@sha256:[a-f0-9]{64}$')
+        fail_msg: Build the demo execution image and set DEMO_EE_IMAGE to its internal registry digest reference.
+
+    - name: Extract only the previously trusted HAProxy SSH host entry
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -F
+          - "{{ lookup('ansible.builtin.env', 'HAPROXY_PUBLIC_IP') }}"
+          - -f
+          - "{{ lookup('ansible.builtin.env', 'DEMO_BOOTSTRAP_KNOWN_HOSTS_FILE') }}"
+      register: demo_verified_known_hosts
+      changed_when: false
+
+    - name: Reconcile common bootstrap resources through the verified dispatcher
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.dispatch
+
+- name: Reconcile the demo workflow objects separately
+  ansible.builtin.import_playbook: setup-demo.yml

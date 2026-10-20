@@ -1,0 +1,14 @@
+---
+- name: Record failure without converting it into workflow success
+  ansible.builtin.set_fact:
+    demo_workflow_state: >-
+      {{ demo_workflow_state | combine({'outcome': 'failed' if demo_workflow_state.outcome == 'in_progress' else demo_workflow_state.outcome}) }}
+
+- name: Publish failure evidence and release only the owned marker
+  ansible.builtin.include_tasks: evidence.yml
+
+- name: Keep the workflow failed even after validated rollback
+  ansible.builtin.fail:
+    msg: >-
+      Workflow {{ demo_workflow_owner_id }} failed ({{ demo_workflow_state.outcome }}).
+      Inspect evidence; Terraform quarantine was not automatically released.

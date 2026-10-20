@@ -1,0 +1,30 @@
+---
+- name: Recheck the actual source before applying quarantine
+  ansible.builtin.include_tasks: validate_request.yml
+
+- name: Require the source still matches this workflow's discovered site
+  ansible.builtin.assert:
+    that:
+      - demo_workflow_active_servers[0].svname in runtime_sites[runtime_source_dc] | map(attribute='server') | list
+    fail_msg: Actual active source changed between stages. Stop without altering traffic.
+
+- name: Revalidate target immediately before source quarantine
+  ansible.builtin.include_tasks: validate_target.yml
+
+- name: Quarantine the discovered source through the supported role
+  ansible.builtin.include_role:
+    name: terraform_workspace
+    tasks_from: operation
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    terraform_workspace_dc: "{{ runtime_source_dc }}"
+    terraform_workspace_reference: "{{ runtime_reference }}"
+    terraform_workspace_action: lock
+
+- name: Record the verified quarantine
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'quarantine': terraform_workspace_result}) }}"

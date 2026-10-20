@@ -1,0 +1,9 @@
+FROM quay.io/ansible-product-demos/apd-ee-27@sha256:ace9ce5ba414524dd0741fe82d4392c04b3414aac08ce273007d1f5706b5694f
+USER 0
+COPY bootstrap/requirements.txt /tmp/demo-requirements.txt
+COPY bootstrap/requirements.yml /tmp/demo-requirements.yml
+COPY bootstrap/aap-requirements.yml /tmp/demo-aap-requirements.yml
+RUN /usr/bin/python3.12 -m pip install --no-cache-dir -r /tmp/demo-requirements.txt \
+    && ansible-galaxy collection install -r /tmp/demo-requirements.yml -p /usr/share/ansible/collections --force \
+    && ansible-galaxy collection install -r /tmp/demo-aap-requirements.yml -p /usr/share/ansible/collections --no-deps --force
+USER 1000

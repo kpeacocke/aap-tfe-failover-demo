@@ -1,0 +1,48 @@
+---
+- name: Verify the demo execution environment and its AWS egress
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Verify the pinned Python SDK is importable
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - -c
+          - "import importlib.metadata; assert importlib.metadata.version('pytfe') == '1.4.1'"
+      changed_when: false
+
+    - name: Verify Terraform API access through the real collection
+      ansible.builtin.include_role:
+        name: terraform_workspace
+
+    - name: Verify the AWS credential's account without exposing its identity details
+      amazon.aws.aws_caller_info:
+        region: "{{ lookup('ansible.builtin.env', 'AWS_REGION') }}"
+      register: demo_readiness_aws
+      no_log: true
+
+    - name: Require the intended lab account
+      ansible.builtin.assert:
+        that:
+          - demo_readiness_aws.account == lookup('ansible.builtin.env', 'DEMO_AWS_ACCOUNT_ID')
+        fail_msg: The AAP AWS credential does not belong to the configured demo account.
+
+    - name: Discover this execution pod's public IPv4 egress
+      ansible.builtin.uri:
+        url: https://checkip.amazonaws.com
+        return_content: true
+        timeout: 15
+      register: demo_execution_egress
+
+    - name: Require a single public IPv4 result
+      ansible.builtin.assert:
+        that:
+          - demo_execution_egress.content | trim is match('^([0-9]{1,3}\.){3}[0-9]{1,3}$')
+          - demo_execution_egress.content | trim | split('.') | map('int') | max <= 255
+        fail_msg: Could not verify execution pod egress; never open a broad SSH CIDR as a fallback.
+
+    - name: Publish the specific egress CIDR for Terraform-controlled SSH access
+      ansible.builtin.set_stats:
+        data:
+          demo_aap_egress_cidr: "{{ demo_execution_egress.content | trim }}/32"

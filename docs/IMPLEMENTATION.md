@@ -1832,6 +1832,55 @@ AAP objects:
 - job templates;
 - workflow graph.
 
+Phase 4 implementation uses common `bootstrap/install-demo.yml` resources and
+separate `bootstrap/setup-demo.yml` workflow configuration, reconciled through
+the verified `infra.aap_configuration.dispatch` 4.10.0 schemas. Common bootstrap
+creates only demo-prefixed organization/team/user, credentials, runtime
+inventory, public Git project, dedicated EE reference and administrator-only
+setup/readiness jobs. The restricted operator team receives workflow execution
+only, without stage-template, credential, inventory-management or setup grants.
+
+The existing RHDP Product Demos EE has older Terraform collection/SDK versions
+than Phase 3's verified dependency set. A dedicated image extends the existing
+AAP-compatible base with pinned dependencies. BuildConfig/ImageStream resources
+live only in `ww-demo-execution` on the existing cluster and use its internal
+registry. A namespace-scoped image-puller binding permits AAP service accounts
+to pull this image. No AAP/OpenShift installation or upgrade, existing EE
+replacement or Portal configuration is included.
+
+The source follows the public Git repository's configured revision (`main` by
+default); an immutable image digest is required for AAP. An administrator-only
+readiness job verifies the Python SDK, Terraform API and AWS account and
+reports the execution pod's IPv4 egress. Terraform's shared root accepts that
+verified optional `aap_ssh_cidr` `/32`, preserving presenter access and adding
+no application-node SSH exposure.
+
+Each named stage is a separate AAP job template using
+`playbooks/aap/stage.yml` and one `demo_workflow` task file, rather than
+duplicating thin entrypoint playbooks for every job. The workflow graph still
+implements the stages specified in sections 12-22. Shared runtime roles remain
+the behavior source of truth. Each isolated stage rediscovers validated
+Terraform output topology and verifies workflow-owned, stage-ordered state in
+the HAProxy marker. Source revision changes or topology changes stop execution.
+Cancellation/unreachability can retain the marker and requires explicit
+administrator inspection.
+
+The recovery workflow uses a read-only Terraform API/output health check at
+the section 22 "Terraform Plan / Health Check" stage; it never bypasses the
+quarantine lock to run a plan. It validates recovered infrastructure,
+applications, standby isolation and the still-active service before normal
+unlock, and never automatically activates the recovered site.
+
+Machine-readable execution evidence is persisted with
+`ansible.builtin.set_stats` in Controller job artifacts (`demo_workflow_result`) and
+retained job output, rather than relying on a local file surviving an ephemeral
+execution pod. Failure evidence remains a failing leaf after successful
+runtime rollback; quarantine is never automatically released on errors.
+
+Phase 4 validation is in progress. Do not start Phase 5 until the local
+multi-job tests, live AAP reconciliation/RBAC checks and full failover/recovery
+acceptance pass.
+
 ## Phase 5
 
 Portal on RHDP OpenShift:

@@ -118,7 +118,7 @@ resource "aws_security_group" "haproxy" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.admin_cidr]
+    cidr_blocks = distinct(compact([var.admin_cidr, var.aap_ssh_cidr]))
   }
 
   egress {

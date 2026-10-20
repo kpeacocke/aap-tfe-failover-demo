@@ -1,0 +1,22 @@
+---
+- name: Read authoritative recovered workspace identity and ownership
+  ansible.builtin.include_role:
+    name: terraform_workspace
+    tasks_from: read_lock
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    terraform_workspace_dc: "{{ runtime_source_dc }}"
+
+- name: Refuse an unrelated quarantine before recovery release
+  ansible.builtin.assert:
+    that:
+      - >-
+        not terraform_workspace_lock_attributes.locked or
+        (terraform_workspace_lock_attributes['locked-reason'] ==
+         'Demo-managed datacentre quarantine - ' ~ runtime_reference ~ ' - ' ~ runtime_source_dc and
+         terraform_workspace_lock_owner is mapping and terraform_workspace_lock_owner.type == 'users')
+    fail_msg: Recovered workspace belongs to another incident or run. No unlock is permitted.

@@ -1,0 +1,49 @@
+---
+- name: Verify the existing supported AAP platform
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Verify the actual demo execution pod before granting SSH access
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+  tasks:
+    - name: Verify the execution environment without logging authentication
+      block:
+        - name: Launch the read-only readiness job on AAP
+          ansible.controller.job_launch:
+            name: Demo | EE Readiness
+            organization: Demo | Datacentre Failover
+            wait: true
+            timeout: 600
+            controller_host: "{{ aap_hostname }}"
+            controller_username: "{{ aap_username | default(omit, true) }}"
+            controller_password: "{{ aap_password | default(omit, true) }}"
+            controller_oauthtoken: "{{ aap_token | default(omit, true) }}"
+            validate_certs: "{{ aap_validate_certs }}"
+          register: demo_readiness_job
+          no_log: true
+
+        - name: Read the completed job's non-secret artifacts
+          ansible.builtin.uri:
+            url: "{{ aap_hostname }}/api/controller/v2/jobs/{{ demo_readiness_job.id }}/"
+            url_username: "{{ aap_username if not aap_token else omit }}"
+            url_password: "{{ aap_password if not aap_token else omit }}"
+            force_basic_auth: "{{ not aap_token }}"
+            headers: "{{ {'Authorization': 'Bearer ' ~ aap_token} if aap_token else {} }}"
+            validate_certs: "{{ aap_validate_certs }}"
+            follow_redirects: none
+            unredirected_headers: [Authorization]
+          register: demo_readiness_result
+          no_log: true
+      rescue:
+        - name: Explain execution readiness failure
+          ansible.builtin.fail:
+            msg: >-
+              Demo execution readiness failed (job {{ demo_readiness_job.id | default('unknown') }}).
+              Inspect image pull, project sync and job output in AAP; do not open broad SSH access.
+
+    - name: Report the verified execution egress for the Terraform SSH rule
+      ansible.builtin.debug:
+        msg: "TF_VAR_aap_ssh_cidr={{ demo_readiness_result.json.artifacts.demo_aap_egress_cidr }}"

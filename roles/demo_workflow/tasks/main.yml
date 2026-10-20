@@ -1,0 +1,19 @@
+---
+- name: Require a known stage and an AAP-owned operation
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - ansible_play_hosts_all | length == 1
+      - demo_stage in ['validate_request', 'recovery_request', 'rollback', 'evidence_failure'] + demo_workflow_predecessors.keys() | list
+      - demo_workflow_owner_id is match('^[1-9][0-9]*$')
+    fail_msg: Only an approved workflow stage with a valid AAP workflow ID can perform this operation.
+
+- name: Acquire or verify this workflow's exclusive marker
+  ansible.builtin.include_tasks: marker.yml
+
+- name: Execute the reusable stage
+  ansible.builtin.include_tasks: "{{ demo_stage }}.yml"
+
+- name: Persist successful stage progress for the next isolated AAP job
+  ansible.builtin.include_tasks: persist.yml
+  when: demo_stage not in ['evidence_success', 'recovery_evidence', 'evidence_failure']

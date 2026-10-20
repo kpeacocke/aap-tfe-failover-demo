@@ -1,0 +1,96 @@
+---
+demo_aap_organization: Demo | Datacentre Failover
+demo_aap_inventory: Demo | Runtime
+demo_aap_project: Demo | Datacentre Failover
+demo_aap_ee: Demo | Failover Execution Environment
+aap_configuration_secure_logging: true
+demo_workflow_stages:
+  - {id: validate_request, name: Validate Request}
+  - {id: determine_state, name: Determine Current State}
+  - {id: validate_target, name: Validate Target DC}
+  - {id: quarantine_source, name: Quarantine Source}
+  - {id: drain_source, name: Drain Source}
+  - {id: activate_target, name: Activate Target}
+  - {id: validate_service, name: Validate Service}
+  - {id: evidence_success, name: Failover Evidence}
+  - {id: rollback, name: Recovery Decision}
+  - {id: evidence_failure, name: Failure Evidence}
+  - {id: recovery_request, name: Validate Recovery Request}
+  - {id: recovery_infrastructure, name: Validate Recovery Infrastructure}
+  - {id: recovery_application, name: Validate Recovery Application}
+  - {id: recovery_network, name: Validate Recovery Network}
+  - {id: recovery_terraform_health, name: Terraform API Health Check}
+  - {id: recovery_unlock, name: Unlock Recovered Workspace}
+  - {id: recovery_standby, name: Return DC to Standby}
+  - {id: recovery_validation, name: Final Recovery Validation}
+  - {id: recovery_evidence, name: Recovery Evidence}
+controller_templates: "{{ lookup('ansible.builtin.template', 'templates/stage-templates.json.j2') | from_json }}"
+controller_workflows:
+  - name: Demo - Datacentre Failover
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed staged failover with health-gated quarantine, drain, activation, rollback and retained evidence.
+    inventory: "{{ demo_aap_inventory }}"
+    allow_simultaneous: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_scm_branch_on_launch: false
+    survey_enabled: true
+    survey_spec:
+      name: Datacentre Failover
+      description: Only approved operational inputs are accepted; credentials and topology are fixed.
+      spec:
+        - {question_name: Service, variable: demo_service, type: multiplechoice, choices: "Customer Orders Demo", required: true, default: "Customer Orders Demo"}
+        - {question_name: Target datacentre, variable: demo_target, type: multiplechoice, choices: "dc1\ndc2", required: true}
+        - {question_name: Reason, variable: demo_reason, type: multiplechoice, choices: "Site failure\nPlanned maintenance\nNetwork degradation\nDisaster recovery test", required: true}
+        - {question_name: Incident/change reference, variable: demo_reference, type: text, required: true, min: 1, max: 64}
+        - {question_name: Confirm traffic move, variable: demo_confirmation, type: multiplechoice, choices: "CONFIRM", required: true}
+    simplified_workflow_nodes:
+      - {identifier: request, unified_job_template: "Demo | Validate Request", success_nodes: [state], failure_nodes: [failed]}
+      - {identifier: state, unified_job_template: "Demo | Determine Current State", success_nodes: [target], failure_nodes: [failed]}
+      - {identifier: target, unified_job_template: "Demo | Validate Target DC", success_nodes: [quarantine], failure_nodes: [failed]}
+      - {identifier: quarantine, unified_job_template: "Demo | Quarantine Source", success_nodes: [drain], failure_nodes: [failed]}
+      - {identifier: drain, unified_job_template: "Demo | Drain Source", success_nodes: [activate], failure_nodes: [rollback]}
+      - {identifier: activate, unified_job_template: "Demo | Activate Target", success_nodes: [validate], failure_nodes: [rollback]}
+      - {identifier: validate, unified_job_template: "Demo | Validate Service", success_nodes: [evidence], failure_nodes: [rollback]}
+      - {identifier: rollback, unified_job_template: "Demo | Recovery Decision", always_nodes: [failed]}
+      - {identifier: evidence, unified_job_template: "Demo | Failover Evidence", failure_nodes: [failed]}
+      - {identifier: failed, unified_job_template: "Demo | Failure Evidence"}
+  - name: Demo - Datacentre Recovery
+    organization: "{{ demo_aap_organization }}"
+    description: Demo-managed health-gated normal unlock; recovered DC stays standby and traffic is never switched back.
+    inventory: "{{ demo_aap_inventory }}"
+    allow_simultaneous: false
+    ask_variables_on_launch: false
+    ask_inventory_on_launch: false
+    ask_limit_on_launch: false
+    ask_scm_branch_on_launch: false
+    survey_enabled: true
+    survey_spec:
+      name: Recover Datacentre
+      description: Release only the recovered standby for the original incident.
+      spec:
+        - {question_name: Service, variable: demo_service, type: multiplechoice, choices: "Customer Orders Demo", required: true, default: "Customer Orders Demo"}
+        - {question_name: Recovered datacentre, variable: demo_recovery_dc, type: multiplechoice, choices: "dc1\ndc2", required: true}
+        - {question_name: Original incident/change reference, variable: demo_reference, type: text, required: true, min: 1, max: 64}
+        - {question_name: Confirm recovered standby release, variable: demo_confirmation, type: multiplechoice, choices: "CONFIRM", required: true}
+    simplified_workflow_nodes:
+      - {identifier: request, unified_job_template: "Demo | Validate Recovery Request", success_nodes: [infrastructure], failure_nodes: [failed]}
+      - {identifier: infrastructure, unified_job_template: "Demo | Validate Recovery Infrastructure", success_nodes: [application], failure_nodes: [failed]}
+      - {identifier: application, unified_job_template: "Demo | Validate Recovery Application", success_nodes: [network], failure_nodes: [failed]}
+      - {identifier: network, unified_job_template: "Demo | Validate Recovery Network", success_nodes: [terraform], failure_nodes: [failed]}
+      - {identifier: terraform, unified_job_template: "Demo | Terraform API Health Check", success_nodes: [unlock], failure_nodes: [failed]}
+      - {identifier: unlock, unified_job_template: "Demo | Unlock Recovered Workspace", success_nodes: [standby], failure_nodes: [failed]}
+      - {identifier: standby, unified_job_template: "Demo | Return DC to Standby", success_nodes: [validate], failure_nodes: [failed]}
+      - {identifier: validate, unified_job_template: "Demo | Final Recovery Validation", success_nodes: [evidence], failure_nodes: [failed]}
+      - {identifier: evidence, unified_job_template: "Demo | Recovery Evidence", failure_nodes: [failed]}
+      - {identifier: failed, unified_job_template: "Demo | Failure Evidence"}
+
+controller_roles:
+  - role: execute
+    workflows:
+      - Demo - Datacentre Failover
+      - Demo - Datacentre Recovery
+    teams:
+      - Demo | Failover Operators
+    lookup_organization: "{{ demo_aap_organization }}"

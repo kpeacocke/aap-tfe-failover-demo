@@ -1,0 +1,7 @@
+---
+- name: Record successful failover
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'outcome': 'success'}) }}"
+
+- name: Publish final evidence and release this workflow's marker
+  ansible.builtin.include_tasks: evidence.yml

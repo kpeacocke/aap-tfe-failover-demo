@@ -1,0 +1,4 @@
+---
+- name: Validate HAProxy topology, standby isolation and active service
+  ansible.builtin.include_role:
+    name: synthetic_validation

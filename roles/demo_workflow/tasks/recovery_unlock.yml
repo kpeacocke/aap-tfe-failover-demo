@@ -1,0 +1,24 @@
+---
+- name: Recheck every recovered application immediately before release
+  ansible.builtin.include_tasks: recovery_application.yml
+
+- name: Recheck standby isolation and healthy active traffic immediately before release
+  ansible.builtin.include_tasks: recovery_network.yml
+
+- name: Normally unlock only the original incident
+  ansible.builtin.include_role:
+    name: terraform_workspace
+    tasks_from: operation
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    terraform_workspace_dc: "{{ runtime_source_dc }}"
+    terraform_workspace_reference: "{{ runtime_reference }}"
+    terraform_workspace_action: unlock
+
+- name: Record the verified recovered workspace state
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'quarantine': terraform_workspace_result}) }}"

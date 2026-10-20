@@ -12,7 +12,7 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 
 class WorkspaceFixture(unittest.TestCase):
@@ -120,6 +120,9 @@ class WorkspaceFixture(unittest.TestCase):
 
             def do_POST(self) -> None:
                 path = urlsplit(self.path).path
+                if path in ("/sts", "/ec2"):
+                    self.reply_aws(path)
+                    return
                 fixture.posts.append(path)
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 site = path.split("/")[4].removeprefix("ws-")
@@ -141,6 +144,39 @@ class WorkspaceFixture(unittest.TestCase):
                     self.reply(404, {"errors": [{"title": "Forbidden fixture operation"}]})
                     return
                 self.reply(200, {"data": workspace})
+
+            def reply_aws(self, path: str) -> None:
+                fields = parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode())
+                action = fields.get("Action", [""])[0]
+                if path == "/sts" and action == "GetCallerIdentity":
+                    body = (
+                        '<GetCallerIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">'
+                        "<GetCallerIdentityResult><Account>123456789012</Account>"
+                        "<Arn>arn:aws:iam::123456789012:user/fixture</Arn><UserId>fixture</UserId>"
+                        "</GetCallerIdentityResult><ResponseMetadata><RequestId>fixture</RequestId>"
+                        "</ResponseMetadata></GetCallerIdentityResponse>"
+                    )
+                elif path == "/ec2" and action == "DescribeInstances":
+                    instances = "".join(
+                        f"<item><instanceId>{instance_id}</instanceId>"
+                        "<instanceState><code>16</code><name>running</name></instanceState></item>"
+                        for instance_id in ("i-0123", "i-0456")
+                    )
+                    body = (
+                        '<DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">'
+                        "<requestId>fixture</requestId><reservationSet><item>"
+                        "<reservationId>r-fixture</reservationId><ownerId>123456789012</ownerId>"
+                        f"<instancesSet>{instances}</instancesSet></item></reservationSet></DescribeInstancesResponse>"
+                    )
+                else:
+                    self.reply(400, {"error": "Only read-only fixture AWS actions are allowed"})
+                    return
+                data = body.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/xml")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         cert = self.root / "cert.pem"

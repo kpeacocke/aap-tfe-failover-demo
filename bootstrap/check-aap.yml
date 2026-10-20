@@ -1,0 +1,48 @@
+---
+- name: Verify access to the existing RHDP AAP instance
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+  tasks:
+    - name: Validate authentication without exposing credentials
+      block:
+        - name: Require a secure endpoint and authentication
+          ansible.builtin.assert:
+            that:
+              - aap_hostname is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?$')
+              - aap_token | length > 0 or (aap_username | length > 0 and aap_password | length > 0)
+          no_log: true
+      rescue:
+        - name: Explain missing connection settings
+          ansible.builtin.fail:
+            msg: Set AAP_HOSTNAME to the HTTPS base URL and AAP_TOKEN or AAP_USERNAME/AAP_PASSWORD in the private .env.
+
+    - name: Query the existing platform gateway without exposing authentication
+      block:
+        - name: Query gateway version
+          ansible.builtin.uri:
+            url: "{{ aap_hostname }}/api/gateway/v1/ping/"
+            url_username: "{{ aap_username if not aap_token else omit }}"
+            url_password: "{{ aap_password if not aap_token else omit }}"
+            force_basic_auth: "{{ not aap_token }}"
+            headers: "{{ {'Authorization': 'Bearer ' ~ aap_token} if aap_token else {} }}"
+            validate_certs: "{{ aap_validate_certs }}"
+            follow_redirects: none
+            unredirected_headers: [Authorization]
+            timeout: 20
+          register: demo_gateway_ping
+          no_log: true
+      rescue:
+        - name: Explain gateway connection failure
+          ansible.builtin.fail:
+            msg: Cannot query the AAP gateway. Check the base URL, credentials, network access and TLS trust; no platform changes were made.
+
+    - name: Require the supplied platform to be AAP 2.7
+      ansible.builtin.assert:
+        that:
+          - demo_gateway_ping.json.version is version('2.7', '>=')
+          - demo_gateway_ping.json.version is version('2.8', '<')
+        fail_msg: The existing platform must report AAP 2.7. This project never installs or upgrades AAP.
+        success_msg: Existing AAP 2.7 gateway is reachable.

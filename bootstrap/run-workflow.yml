@@ -1,0 +1,55 @@
+---
+- name: Verify the supported existing platform
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Launch only the approved demo workflow
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+  tasks:
+    - name: Validate the administrative CLI request
+      ansible.builtin.assert:
+        that:
+          - demo_launch_operation in ['failover', 'recovery']
+          - demo_launch_dc in ['dc1', 'dc2']
+          - demo_launch_reference is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+          - demo_launch_mode in ['planned', 'failure']
+        fail_msg: Supply an approved operation, datacentre, reference and failover mode.
+
+    - name: Build the same restricted survey fields used by the future Portal
+      ansible.builtin.set_fact:
+        demo_launch_fields: >-
+          {{ {'demo_service': 'Customer Orders Demo', 'demo_reference': demo_launch_reference,
+              'demo_confirmation': 'CONFIRM'} |
+             combine({'demo_target': demo_launch_dc,
+                      'demo_reason': 'Site failure' if demo_launch_mode == 'failure' else 'Planned maintenance'}
+                     if demo_launch_operation == 'failover' else {'demo_recovery_dc': demo_launch_dc}) }}
+
+    - name: Launch and wait without exposing authentication
+      block:
+        - name: Execute the approved workflow through its supported module
+          ansible.controller.workflow_launch:
+            name: "{{ 'Demo - Datacentre Failover' if demo_launch_operation == 'failover' else 'Demo - Datacentre Recovery' }}"
+            organization: Demo | Datacentre Failover
+            extra_vars: "{{ demo_launch_fields }}"
+            wait: true
+            timeout: 3600
+            controller_host: "{{ aap_hostname }}"
+            controller_username: "{{ aap_username | default(omit, true) }}"
+            controller_password: "{{ aap_password | default(omit, true) }}"
+            controller_oauthtoken: "{{ aap_token | default(omit, true) }}"
+            validate_certs: "{{ aap_validate_certs }}"
+          register: demo_launched_workflow
+          no_log: true
+      rescue:
+        - name: Report failed or unconfirmed workflow execution
+          ansible.builtin.fail:
+            msg: >-
+              AAP workflow execution failed or could not be confirmed (job {{ demo_launched_workflow.id | default('unknown') }}).
+              Inspect the workflow graph and job evidence in AAP. Do not automatically clear quarantine or operation markers.
+
+    - name: Report the verified workflow result
+      ansible.builtin.debug:
+        msg: "AAP workflow {{ demo_launched_workflow.id }}: {{ demo_launched_workflow.status }}"

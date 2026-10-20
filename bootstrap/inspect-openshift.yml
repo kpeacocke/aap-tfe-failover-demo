@@ -1,0 +1,62 @@
+---
+- name: Inspect the existing RHDP OpenShift image-build capabilities
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    demo_openshift_api: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_API_URL') | regex_replace('/$', '') }}"
+    demo_openshift_token: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_TOKEN') }}"
+  tasks:
+    - name: Inspect the existing cluster without exposing the token
+      block:
+        - name: Require existing cluster access settings
+          ansible.builtin.assert:
+            that:
+              - demo_openshift_api is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?$')
+              - demo_openshift_token | length > 0
+          no_log: true
+
+        - name: Query existing cluster and image registry metadata
+          ansible.builtin.uri:
+            url: "{{ demo_openshift_api }}{{ item }}"
+            headers:
+              Authorization: "Bearer {{ demo_openshift_token }}"
+            validate_certs: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_VALIDATE_CERTS') | default('true', true) | bool }}"
+            ca_path: "{{ lookup('ansible.builtin.env', 'OPENSHIFT_CA_CERT') | default(omit, true) }}"
+            follow_redirects: none
+            unredirected_headers: [Authorization]
+            return_content: true
+            timeout: 20
+          loop:
+            - /version
+            - /apis/config.openshift.io/v1/clusteroperators/image-registry
+            - /apis/apps/v1/deployments
+          register: demo_openshift_inspection
+          no_log: true
+      rescue:
+        - name: Report cluster inspection failure
+          ansible.builtin.fail:
+            msg: Cannot inspect the existing OpenShift cluster. Check API URL, token permissions, network access and TLS trust; no cluster changes were made.
+
+    - name: Display existing cluster version
+      ansible.builtin.debug:
+        msg: "{{ demo_openshift_inspection.results[0].json.gitVersion }}"
+
+    - name: Require the existing image registry to be available
+      ansible.builtin.assert:
+        that:
+          - >-
+            demo_openshift_inspection.results[1].json.status.conditions |
+            selectattr('type', 'equalto', 'Available') | map(attribute='status') | list == ['True']
+        fail_msg: The supplied cluster's image registry is not available. Do not install or replace it through this project.
+
+    - name: Display existing AAP deployment service accounts and images
+      ansible.builtin.debug:
+        msg:
+          namespace: "{{ item.metadata.namespace }}"
+          deployment: "{{ item.metadata.name }}"
+          service_account: "{{ item.spec.template.spec.serviceAccountName | default('default') }}"
+          images: "{{ item.spec.template.spec.containers | map(attribute='image') | list }}"
+      loop: "{{ demo_openshift_inspection.results[2].json['items'] | selectattr('metadata.name', 'search', 'aap|automation-controller') | list }}"
+      loop_control:
+        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"

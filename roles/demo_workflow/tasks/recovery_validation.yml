@@ -1,0 +1,6 @@
+---
+- name: Validate recovered applications
+  ansible.builtin.include_tasks: recovery_application.yml
+
+- name: Validate the unchanged active service and recovered standby
+  ansible.builtin.include_tasks: validate_service.yml

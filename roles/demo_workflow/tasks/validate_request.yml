@@ -1,0 +1,19 @@
+---
+- name: Read HAProxy topology before accepting the request
+  ansible.builtin.include_role:
+    name: haproxy_state
+
+- name: Identify the currently active site's servers
+  ansible.builtin.set_fact:
+    demo_workflow_active_servers: "{{ haproxy_state_servers | rejectattr('status', 'search', '^MAINT') | list }}"
+
+- name: Require an unambiguous different target
+  ansible.builtin.assert:
+    that:
+      - demo_workflow_active_servers | length == 2
+      - demo_workflow_active_servers | selectattr('status', 'search', '^DRAIN|^NOLB') | list | length == 0
+      - >-
+        demo_workflow_active_servers | map(attribute='svname') | sort in
+        [runtime_sites.dc1 | map(attribute='server') | sort, runtime_sites.dc2 | map(attribute='server') | sort]
+      - demo_workflow_active_servers[0].svname not in runtime_sites[runtime_target_dc] | map(attribute='server') | list
+    fail_msg: Target is already active or runtime state is ambiguous. No quarantine or traffic changes are permitted.

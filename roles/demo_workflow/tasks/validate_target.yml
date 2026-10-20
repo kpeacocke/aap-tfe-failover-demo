@@ -1,0 +1,31 @@
+---
+- name: Require healthy target identity, version and connectivity
+  ansible.builtin.include_role:
+    name: application_health
+  vars:
+    application_health_dc: "{{ runtime_target_dc }}"
+    application_health_nodes: "{{ runtime_sites[runtime_target_dc] }}"
+    application_health_required: true
+
+- name: Require both AWS target instances running in the intended account
+  ansible.builtin.include_tasks:
+    file: aws_health.yml
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    demo_workflow_health_dc: "{{ runtime_target_dc }}"
+
+- name: Require current target workspace availability
+  ansible.builtin.include_role:
+    name: terraform_workspace
+    tasks_from: require_available
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    terraform_workspace_dc: "{{ runtime_target_dc }}"

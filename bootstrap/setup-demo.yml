@@ -1,0 +1,18 @@
+---
+- name: Require the existing supported platform before reconciliation
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Validate the restricted workflow configuration before changing objects
+  ansible.builtin.import_playbook: validate-configuration.yml
+
+- name: Reconcile only failover-specific stages, workflows and execution roles
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+    - aap-demo-vars.yml
+  tasks:
+    - name: Reconcile reusable stages and workflows using the supported dispatcher
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.dispatch

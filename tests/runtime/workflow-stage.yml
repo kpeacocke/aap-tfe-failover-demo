@@ -1,0 +1,8 @@
+---
+- name: Execute an isolated workflow stage against real HAProxy and TLS API fixtures
+  hosts: haproxy
+  gather_facts: false
+  vars_files:
+    - ../../playbooks/aap/runtime-vars.yml
+  roles:
+    - demo_workflow

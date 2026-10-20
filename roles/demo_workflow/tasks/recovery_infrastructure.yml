@@ -1,0 +1,11 @@
+---
+- name: Validate recovered instance identities and running state without mutations
+  ansible.builtin.include_tasks:
+    file: aws_health.yml
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    demo_workflow_health_dc: "{{ runtime_source_dc }}"

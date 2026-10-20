@@ -1,0 +1,21 @@
+---
+- name: Record successful stage progress
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'completed_stage': demo_stage}) }}"
+
+- name: Persist only non-secret workflow state
+  ansible.builtin.copy:
+    dest: "{{ runtime_operation_marker }}/request.json"
+    mode: "0600"
+    content: "{{ demo_workflow_state | to_nice_json }}"
+
+- name: Publish non-secret stage evidence in Controller artifacts
+  ansible.builtin.set_stats:
+    data:
+      demo_workflow_progress:
+        owner_id: "{{ demo_workflow_owner_id }}"
+        operation: "{{ demo_workflow_state.operation }}"
+        reference: "{{ demo_workflow_state.reference }}"
+        completed_stage: "{{ demo_stage }}"
+        source_dc: "{{ demo_workflow_state.source_dc }}"
+        target_dc: "{{ demo_workflow_state.target_dc }}"

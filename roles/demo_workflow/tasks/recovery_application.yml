@@ -1,0 +1,8 @@
+---
+- name: Require every recovered application node healthy with expected identity
+  ansible.builtin.include_role:
+    name: application_health
+  vars:
+    application_health_dc: "{{ runtime_source_dc }}"
+    application_health_nodes: "{{ runtime_sites[runtime_source_dc] }}"
+    application_health_required: true

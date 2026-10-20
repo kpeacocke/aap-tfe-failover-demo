@@ -1,0 +1,22 @@
+---
+- name: Reverify source ownership and target readiness before traffic mutation
+  ansible.builtin.include_tasks: quarantine_source.yml
+
+- name: Record mutation intent before touching traffic
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'traffic_mutation_started': true}) }}"
+
+- name: Persist mutation intent for the failure branch
+  ansible.builtin.copy:
+    dest: "{{ runtime_operation_marker }}/request.json"
+    mode: "0600"
+    content: "{{ demo_workflow_state | to_nice_json }}"
+
+- name: Drain or disable the source with the existing runtime role
+  ansible.builtin.include_role:
+    name: haproxy_state
+    tasks_from: drain
+
+- name: Persist the aggregate drain result across isolated jobs
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'drain': haproxy_state_drain_result}) }}"

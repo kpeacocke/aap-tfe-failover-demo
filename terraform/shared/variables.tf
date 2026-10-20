@@ -113,3 +113,14 @@ variable "admin_cidr" {
     error_message = "admin_cidr must be a valid IPv4 CIDR block."
   }
 }
+
+variable "aap_ssh_cidr" {
+  description = "Optional verified AAP execution-pod IPv4 egress /32 for HAProxy SSH only."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.aap_ssh_cidr == null || (can(cidrnetmask(var.aap_ssh_cidr)) && can(regex("/32$", var.aap_ssh_cidr)))
+    error_message = "aap_ssh_cidr must be a valid IPv4 /32, not a broad subnet."
+  }
+}

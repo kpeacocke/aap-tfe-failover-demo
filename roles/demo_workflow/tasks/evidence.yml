@@ -1,0 +1,66 @@
+---
+- name: Inspect authoritative final source workspace state without changing it
+  ansible.builtin.include_role:
+    name: terraform_workspace
+    tasks_from: read_lock
+    apply:
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  vars:
+    terraform_workspace_dc: "{{ runtime_source_dc }}"
+  when: runtime_source_dc in ['dc1', 'dc2']
+
+- name: Require the successful workflow's final quarantine policy
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_lock_attributes.locked == (demo_workflow_state.operation == 'failover')
+      - >-
+        demo_workflow_state.operation != 'failover' or
+        (terraform_workspace_lock_attributes['locked-reason'] ==
+         'Demo-managed datacentre quarantine - ' ~ runtime_reference ~ ' - ' ~ runtime_source_dc and
+         terraform_workspace_lock_owner is mapping and terraform_workspace_lock_owner.type == 'users')
+    fail_msg: Final workspace state does not match the workflow's quarantine policy.
+  when: demo_workflow_state.outcome == 'success'
+
+- name: Capture the current quarantine instead of reporting a stale snapshot
+  ansible.builtin.set_fact:
+    demo_workflow_final_quarantine:
+      workspace_id: "{{ terraform_workspace_workspaces[runtime_source_dc].id }}"
+      workspace_name: "{{ terraform_workspace_workspaces[runtime_source_dc].name }}"
+      locked: "{{ terraform_workspace_lock_attributes.locked }}"
+      reason: "{{ terraform_workspace_lock_attributes['locked-reason'] }}"
+      verified_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+  when: runtime_source_dc in ['dc1', 'dc2']
+
+- name: Build the machine-readable result without secrets
+  ansible.builtin.set_fact:
+    demo_workflow_result:
+      workflow_id: "{{ demo_workflow_owner_id }}"
+      operation: "{{ demo_workflow_state.operation }}"
+      reference: "{{ demo_workflow_state.reference }}"
+      service: Customer Orders Demo
+      source_dc: "{{ demo_workflow_state.source_dc }}"
+      target_dc: "{{ demo_workflow_state.target_dc }}"
+      outcome: "{{ demo_workflow_state.outcome }}"
+      last_completed_stage: "{{ demo_workflow_state.completed_stage }}"
+      started_at: "{{ demo_workflow_state.started_at }}"
+      finished_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+      quarantine: "{{ demo_workflow_final_quarantine | default({}) }}"
+      validation: "{{ demo_workflow_state.validation | default({}) }}"
+      drain: "{{ demo_workflow_state.drain | default({}) }}"
+
+- name: Persist machine-readable evidence in Controller job artifacts
+  ansible.builtin.set_stats:
+    data:
+      demo_workflow_result: "{{ demo_workflow_result }}"
+
+- name: Print the operational evidence as JSON in retained job output
+  ansible.builtin.debug:
+    msg: "{{ demo_workflow_result }}"
+
+- name: Release only this verified workflow's marker
+  ansible.builtin.file:
+    path: "{{ runtime_operation_marker }}"
+    state: absent

@@ -1,0 +1,21 @@
+{% set templates = [] %}
+{% for stage in demo_workflow_stages %}
+{% set ignored = templates.append({
+  'name': 'Demo | ' ~ stage.name,
+  'organization': demo_aap_organization,
+  'description': 'Demo-managed reusable ' ~ stage.id ~ ' stage; launch only through its approved workflow.',
+  'project': demo_aap_project,
+  'inventory': demo_aap_inventory,
+  'execution_environment': demo_aap_ee,
+  'playbook': 'playbooks/aap/stage.yml',
+  'credentials': ['Demo | Terraform API', 'Demo | HAProxy SSH', 'Demo | AWS Health Read'],
+  'extra_vars': {'demo_stage': stage.id},
+  'ask_variables_on_launch': false,
+  'ask_inventory_on_launch': false,
+  'ask_limit_on_launch': false,
+  'ask_scm_branch_on_launch': false,
+  'allow_simultaneous': false,
+  'timeout': 600
+}) %}
+{% endfor %}
+{{ templates | to_json }}

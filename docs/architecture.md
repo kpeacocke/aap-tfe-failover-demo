@@ -1,4 +1,4 @@
-# Demo architecture (Phases 1-3)
+# Demo architecture (Phases 1-4)
 
 ## Responsibility boundaries
 
@@ -62,10 +62,35 @@ identity in a presenter-friendly page.
 ## RHDP boundary
 
 The RHDP catalog environment supplies AAP 2.7 and the OpenShift cluster. This
-implementation neither installs nor changes them. Self-Service
+implementation never installs or upgrades them; Phase 4 adds only demo-owned
+AAP content and a namespaced execution-image build. Self-Service
 Automation Portal is an add-on: a later phase will detect and reuse an existing
 Portal deployment, or deploy Portal onto the supplied OpenShift cluster if
-missing. No AAP or Portal configuration is part of the completed phases.
+missing. Portal configuration remains outside Phase 4.
+
+## AAP workflow execution
+
+The existing AAP 2.7 gateway is verified before declarative dispatch
+reconciliation. Common bootstrap and demo-specific setup are separate.
+The public Git project requires no source-control secret. A dedicated EE is
+built on existing RHDP OpenShift and referenced by digest; existing EEs remain
+unchanged. Terraform grants only the verified execution-egress `/32` SSH access
+to HAProxy, in addition to the presenter.
+
+Each workflow stage is a separate job. It rediscovers validated Terraform
+outputs, creates only an in-memory HAProxy host and uses AAP's injected Machine
+credential plus explicitly verified SSH host trust. Non-secret state is held
+in the HAProxy marker and checked for workflow ownership, stage order,
+reference, revision and topology before later jobs proceed.
+The stage graph includes quarantine before traffic mutation and explicit
+rollback/escalation/failure-evidence branches. Machine-readable evidence is
+retained in Controller artifacts.
+
+Recovery performs read-only AWS identity/instance and Terraform API health
+checks, validates recovered applications and standby network isolation, then
+normally unlocks only the original incident. Traffic does not switch back.
+A demo operator team receives execute access to only these two workflows;
+individual stage jobs and administrative reconciliation are not granted.
 
 ## API-integrated runtime failover
 
@@ -98,8 +123,8 @@ infrastructure mutations must be avoided.
 ## Current limitations
 
 - HAProxy runtime state resets to DC1 on restart or replacement.
-- No AAP workflow, Portal template, full recovery workflow, Ansible bootstrap,
-  or automated teardown is implemented yet.
+- Portal templates/deployment and full end-to-end bootstrap/teardown remain
+  later phases. Phase 4 live workflow validation must pass before continuing.
 - The Phase 1 manual switch helper bypasses Phase 3 quarantine; use the Ansible
   CLI for integrated operations and do not run both concurrently.
 - Enterprise endpoint compatibility is fixture-tested; live acceptance uses

@@ -1,0 +1,53 @@
+---
+- name: Prepare a private topology snapshot for this workflow stage
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Require an AAP workflow identity and injected SSH trust
+      ansible.builtin.assert:
+        that:
+          - awx_workflow_job_id | default(tower_workflow_job_id | default('')) | string is match('^[1-9][0-9]*$')
+          - lookup('ansible.builtin.env', 'DEMO_SSH_KNOWN_HOSTS_FILE') | length > 0
+        fail_msg: Run this stage through the approved AAP workflow with the demo runtime and Machine credentials.
+
+    - name: Allocate a credential-free temporary inventory
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -demo-inventory.json
+      register: demo_stage_inventory
+
+    - name: Set the discovery destination without using a private-key file
+      ansible.builtin.set_fact:
+        terraform_workspace_inventory_path: "{{ demo_stage_inventory.path }}"
+        runtime_ssh_private_key_path: /dev/null
+
+- name: Discover current topology through the existing API-only entrypoint
+  ansible.builtin.import_playbook: ../terraform-discover.yml
+
+- name: Create the in-memory runtime host using AAP's injected SSH agent
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Read only the validated topology inventory
+      ansible.builtin.set_fact:
+        demo_stage_topology: "{{ (lookup('ansible.builtin.file', demo_stage_inventory.path) | from_json).all.children.haproxy.hosts.demo_haproxy }}"
+
+    - name: Add the demo HAProxy host without copying API credentials
+      ansible.builtin.add_host:
+        name: demo_haproxy
+        groups: haproxy
+        ansible_host: "{{ demo_stage_topology.ansible_host }}"
+        ansible_user: ec2-user
+        ansible_ssh_common_args: >-
+          -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile={{ lookup('ansible.builtin.env', 'DEMO_SSH_KNOWN_HOSTS_FILE') }}
+        runtime_sites: "{{ demo_stage_topology.runtime_sites }}"
+        runtime_frontdoor_url: "{{ demo_stage_topology.runtime_frontdoor_url }}"
+        terraform_workspace_workspaces: "{{ demo_stage_topology.terraform_workspace_workspaces }}"
+
+    - name: Remove the temporary topology file
+      ansible.builtin.file:
+        path: "{{ demo_stage_inventory.path }}"
+        state: absent

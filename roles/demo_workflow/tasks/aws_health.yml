@@ -1,0 +1,37 @@
+---
+- name: Require explicit AWS account and region guards
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.env', 'DEMO_AWS_ACCOUNT_ID') is match('^[0-9]{12}$')
+      - lookup('ansible.builtin.env', 'AWS_REGION') is match('^[a-z]{2}(-[a-z]+)+-[0-9]+$')
+    fail_msg: The demo runtime credential must contain the expected AWS account ID and verified lab region.
+
+- name: Verify AWS identity and read-only instance state
+  block:
+    - name: Query the credential's account
+      amazon.aws.aws_caller_info:
+        region: "{{ lookup('ansible.builtin.env', 'AWS_REGION') }}"
+      register: demo_workflow_aws_identity
+      no_log: true
+
+    - name: Read only the expected datacentre instance IDs
+      amazon.aws.ec2_instance_info:
+        region: "{{ lookup('ansible.builtin.env', 'AWS_REGION') }}"
+        instance_ids: "{{ runtime_sites[demo_workflow_health_dc] | map(attribute='instance_id') | list }}"
+      register: demo_workflow_aws_instances
+      no_log: true
+  rescue:
+    - name: Report AWS inspection failure
+      ansible.builtin.fail:
+        msg: AWS identity/instance health inspection failed. Check demo credential read permissions and region; no AWS resources were changed.
+
+- name: Require the intended account and both running instances
+  ansible.builtin.assert:
+    that:
+      - demo_workflow_aws_identity.account == lookup('ansible.builtin.env', 'DEMO_AWS_ACCOUNT_ID')
+      - demo_workflow_aws_instances.instances | length == 2
+      - >-
+        demo_workflow_aws_instances.instances | map(attribute='instance_id') | sort ==
+        runtime_sites[demo_workflow_health_dc] | map(attribute='instance_id') | sort
+      - demo_workflow_aws_instances.instances | map(attribute='state.name') | unique | list == ['running']
+    fail_msg: Account identity or expected instance state does not match the demo topology. Do not continue.

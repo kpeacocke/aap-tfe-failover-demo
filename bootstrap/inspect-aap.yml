@@ -1,0 +1,48 @@
+---
+- name: Verify the existing platform before inspection
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Inspect existing AAP execution capabilities without changing configuration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+  tasks:
+    - name: Read existing resource metadata with sanitized failure reporting
+      block:
+        - name: Query execution environments and controller capacity
+          ansible.builtin.uri:
+            url: "{{ aap_hostname }}/api/controller/v2/{{ item }}/?page_size=100"
+            url_username: "{{ aap_username if not aap_token else omit }}"
+            url_password: "{{ aap_password if not aap_token else omit }}"
+            force_basic_auth: "{{ not aap_token }}"
+            headers: "{{ {'Authorization': 'Bearer ' ~ aap_token} if aap_token else {} }}"
+            validate_certs: "{{ aap_validate_certs }}"
+            follow_redirects: none
+            unredirected_headers: [Authorization]
+            timeout: 20
+          loop:
+            - execution_environments
+            - instances
+            - instance_groups
+          register: demo_aap_inspection
+          no_log: true
+      rescue:
+        - name: Report inspection failure
+          ansible.builtin.fail:
+            msg: Cannot inspect existing AAP execution resources. Check administrator permissions and gateway connectivity.
+
+    - name: Display execution environment references only
+      ansible.builtin.debug:
+        msg: "{{ item.id }}: {{ item.name }} -> {{ item.image }}"
+      loop: "{{ demo_aap_inspection.results[0].json.results }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Display execution instance capacity only
+      ansible.builtin.debug:
+        msg: "{{ item.hostname }}: {{ item.node_type }}, enabled={{ item.enabled }}, capacity={{ item.capacity }}"
+      loop: "{{ demo_aap_inspection.results[1].json.results }}"
+      loop_control:
+        label: "{{ item.hostname }}"

@@ -1,0 +1,47 @@
+---
+- name: Require rollback to belong to a traffic-mutating failover
+  ansible.builtin.assert:
+    that:
+      - demo_workflow_state.operation == 'failover'
+      - demo_workflow_state.traffic_mutation_started
+      - runtime_source_dc in ['dc1', 'dc2']
+      - runtime_target_dc != runtime_source_dc
+    fail_msg: No owned traffic mutation is confirmed; automatic rollback is unsafe.
+
+- name: Recheck original source before attempting rollback
+  ansible.builtin.include_role:
+    name: application_health
+  vars:
+    application_health_dc: "{{ runtime_source_dc }}"
+    application_health_nodes: "{{ runtime_sites[runtime_source_dc] }}"
+    application_health_required: false
+
+- name: Default to human escalation without releasing quarantine
+  ansible.builtin.set_fact:
+    demo_workflow_state: "{{ demo_workflow_state | combine({'outcome': 'human_escalation', 'quarantine_retained': true}) }}"
+
+- name: Attempt rollback only when both original source nodes are healthy
+  when: application_health_healthy | length == 2
+  block:
+    - name: Activate only the healthy original source
+      ansible.builtin.include_role:
+        name: haproxy_state
+        tasks_from: activate
+      vars:
+        haproxy_state_active_dc: "{{ runtime_source_dc }}"
+        haproxy_state_inactive_dc: "{{ runtime_target_dc }}"
+
+    - name: Validate restored original service
+      ansible.builtin.include_role:
+        name: synthetic_validation
+      vars:
+        synthetic_validation_active_dc: "{{ runtime_source_dc }}"
+        synthetic_validation_inactive_dc: "{{ runtime_target_dc }}"
+
+    - name: Record validated traffic rollback as a failed failover
+      ansible.builtin.set_fact:
+        demo_workflow_state: "{{ demo_workflow_state | combine({'outcome': 'rolled_back', 'validation': synthetic_validation_result}) }}"
+  rescue:
+    - name: Explicitly report unsafe or unsuccessful rollback
+      ansible.builtin.debug:
+        msg: Automatic rollback could not be validated. Human escalation required; quarantine remains in place.

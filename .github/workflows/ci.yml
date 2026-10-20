@@ -44,10 +44,19 @@ jobs:
         run: |
           pip install -r bootstrap/requirements.txt ansible-lint yamllint
           ansible-galaxy collection install -r bootstrap/requirements.yml
+          ansible-galaxy collection install -r bootstrap/aap-requirements.yml --no-deps
+      - name: Validate AAP configuration and expose certified module schemas
+        run: |
+          bash tests/test-aap-config.sh
+          mkdir -p .local/aap-collections/ansible_collections
+          container=$(docker create ww-demo-aap-ee:phase4 /bin/true)
+          docker cp "$container:/usr/share/ansible/collections/ansible_collections/ansible" .local/aap-collections/ansible_collections/
+          docker rm "$container"
       - name: Lint Ansible runtime automation
         run: |
-          ansible-lint playbooks/runtime-failover.yml playbooks/terraform-discover.yml playbooks/terraform-workspace.yml roles tests/terraform_api/operation.yml
-          yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles tests/terraform_api/operation.yml
+          export ANSIBLE_COLLECTIONS_PATH="$PWD/.local/aap-collections:$HOME/.ansible/collections"
+          ansible-lint playbooks/runtime-failover.yml playbooks/terraform-discover.yml playbooks/terraform-workspace.yml playbooks/aap/stage.yml playbooks/aap/readiness.yml roles bootstrap/check-aap.yml bootstrap/install-demo.yml bootstrap/setup-demo.yml bootstrap/build-ee.yml bootstrap/check-runtime.yml bootstrap/run-workflow.yml bootstrap/inspect-aap.yml bootstrap/inspect-openshift.yml tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
+          yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap playbooks roles tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
       - name: Test Terraform API integration without cloud credentials
         run: bash tests/test-terraform-api.sh
       - name: Test runtime failover and failure handling without cloud credentials
