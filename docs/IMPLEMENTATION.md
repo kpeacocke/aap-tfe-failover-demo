@@ -17,6 +17,11 @@ It must be deterministic, understandable, repeatable and easy to reset.
 
 Do not build unnecessary production complexity.
 
+Use customer-neutral branding: the application title is "Datacentre Failover
+Demo" and AWS demo tags use "Datacentre-Failover". Retain the existing
+`ww-demo-*` workspace/resource identifiers and internal paths for compatibility
+with the deployed Phase 1 state; they are not customer-facing branding.
+
 ---
 
 ## Platform assumptions
@@ -29,6 +34,18 @@ Assume RHDP already provides and configures:
 - an OpenShift cluster suitable for demo add-on workloads
 - AAP/OpenShift access and credentials from the RHDP catalog item
 - AWS access/credentials suitable for the demo environment
+
+Deploy the demo AWS resources in the account and region used by the supplied
+RHDP lab. Verify the lab AWS demo workloads' region before provisioning;
+do not infer it from the account sign-in URL or a presenter's local AWS profile.
+Phase 1 accepts the verified region through `TF_VAR_aws_region` in `.env`, with
+no hardcoded regional fallback. All three workspaces must use the same region.
+
+Phase 1 may generate a dedicated SSH private key locally for HAProxy access.
+Terraform registers only its public key as a demo-managed EC2 key pair in the
+selected region and removes that registration on destroy. Never generate or
+store private keys in Terraform state. Reuse an existing EC2 key pair only when
+the presenter already holds its matching private key.
 
 Assume the presenter provides:
 
@@ -153,7 +170,7 @@ Example:
 Before failover it must clearly show:
 
 ```text
-Woolworths Demo Service
+Datacentre Failover Demo
 ACTIVE DATACENTRE: DC1
 HOST: dc1-app-01
 STATUS: HEALTHY
@@ -164,7 +181,7 @@ Repeated requests may alternate between the two active DC1 application nodes.
 After failover it must clearly show:
 
 ```text
-Woolworths Demo Service
+Datacentre Failover Demo
 ACTIVE DATACENTRE: DC2
 HOST: dc2-app-02
 STATUS: HEALTHY
@@ -435,7 +452,7 @@ Do not create one monolithic playbook.
 
 Create a workflow job template named:
 
-`WW Demo - Datacentre Failover`
+`Demo - Datacentre Failover`
 
 Conceptual graph:
 
@@ -798,7 +815,7 @@ Do not store secrets.
 
 Create a second workflow:
 
-`WW Demo - Datacentre Recovery`
+`Demo - Datacentre Recovery`
 
 Portal template:
 
@@ -891,7 +908,7 @@ RHDP catalog item
                     |
                     +--> connected to existing AAP 2.7
                     |
-                    +--> WW Demo failover/recovery templates
+                    +--> Demo failover/recovery templates
 ```
 
 ## Portal bootstrap behaviour
@@ -1113,7 +1130,7 @@ Only disable dependency checks when an actual ordering issue requires it.
 All created resources must use a unique demo prefix, for example:
 
 ```text
-WW Demo |
+Demo |
 ```
 
 or:
@@ -1133,7 +1150,7 @@ After the initial external bootstrap, create an in-platform setup/reconcile job 
 Suggested name:
 
 ```text
-WW Demo | Setup
+Demo | Setup
 ```
 
 That job should use this repository, the AAP 2.7-compatible demo execution environment, and `bootstrap/setup-demo.yml`.
@@ -1221,17 +1238,17 @@ demo:
 
 aap:
   url: https://aap.example.com
-  organisation: Woolworths Demo
-  project: WW Failover Demo
+  organisation: Datacentre Failover Demo
+  project: Datacentre Failover Demo
   execution_environment: Default execution environment
 
 terraform:
   url: https://app.terraform.io
   organisation: example
-  project: woolworths-failover
+  project: datacentre-failover
 
 aws:
-  region: ap-southeast-2
+  region: "<verified RHDP lab AWS region>"
 
 openshift:
   api_url: https://api.example.openshiftapps.com:6443
@@ -1410,7 +1427,7 @@ Example tags:
 tags = {
   Project   = "AAP-TFE-Failover-Demo"
   ManagedBy = "Terraform"
-  Demo      = "Woolworths"
+  Demo      = "Datacentre-Failover"
 }
 ```
 
@@ -1659,7 +1676,7 @@ Do not implement:
 - database replication;
 - persistent session replication;
 - BGP convergence;
-- real Woolworths infrastructure;
+- real customer infrastructure;
 - ServiceNow;
 - Event-Driven Ansible;
 - Vault;
@@ -1680,6 +1697,12 @@ Implement in this exact order.
 
 ## Phase 1
 
+For manual Phase 1 provisioning, the Terraform CLI wrapper may use the HCP
+Terraform API to create a missing demo workspace before initialization. New
+workspaces use local execution and auto-apply disabled; existing workspace
+settings are not modified. This narrowly scoped helper does not replace the
+Phase 6 Ansible bootstrap or implement operational workspace locking.
+
 Terraform infrastructure:
 
 - shared;
@@ -1689,6 +1712,14 @@ Terraform infrastructure:
 - HAProxy.
 
 Prove manual failover.
+
+Phase 1 live validation completed on 2026-10-20 in the lab's `us-east-2`
+region. All three HCP Terraform workspaces were created and applied; the four
+application health endpoints passed. Front-door requests alternated between
+both DC1 nodes, then both DC2 nodes after manual activation, then both DC1
+nodes after switching back. The browser page displayed a healthy DC1 service.
+Post-deployment plans for all three roots reported no changes. Phase 2 is the
+next recommended phase; AAP and Portal configuration remain unimplemented.
 
 ## Phase 2
 

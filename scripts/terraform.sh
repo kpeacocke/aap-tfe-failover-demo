@@ -39,7 +39,43 @@ fi
 export TF_VAR_terraform_organization="${TF_VAR_terraform_organization:-$HCP_TERRAFORM_ORGANIZATION}"
 terraform_root="$script_dir/../terraform/$root"
 
+case "$1" in
+    plan|apply|destroy|import|refresh)
+        if [[ ! "${TF_VAR_aws_region:-}" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]+$ ]]; then
+            echo "Set TF_VAR_aws_region in .env to the verified region of the existing RHDP lab. No default region is assumed." >&2
+            exit 1
+        fi
+        ;;
+esac
+
+if [[ "$root" == "shared" && -z "${TF_VAR_ssh_key_pair_name:-}" && -z "${TF_VAR_ssh_public_key:-}" ]]; then
+    case "$1" in
+        plan|apply|destroy|import|refresh)
+            public_key_path="${SSH_PUBLIC_KEY_PATH:-$repo_root/.local/ssh/ww-demo.pub}"
+            if [[ "$public_key_path" != /* ]]; then
+                public_key_path="$repo_root/$public_key_path"
+            fi
+            if [[ ! -r "$public_key_path" ]]; then
+                echo "Demo SSH public key is missing. Run bash scripts/create-ssh-key.sh first." >&2
+                exit 1
+            fi
+            unset TF_VAR_ssh_key_pair_name
+            TF_VAR_ssh_public_key=$(cat "$public_key_path")
+            export TF_VAR_ssh_public_key
+            ;;
+    esac
+fi
+
 if [[ "$1" == "init" ]]; then
+    backend_enabled=true
+    for argument in "${@:2}"; do
+        if [[ "$argument" == "-backend=false" ]]; then
+            backend_enabled=false
+        fi
+    done
+    if [[ "$backend_enabled" == true ]]; then
+        bash "$script_dir/ensure-workspace.sh" "ww-demo-$root"
+    fi
     cat > "$terraform_root/backend.hcl" <<BACKEND_CONFIG
 organization = "$HCP_TERRAFORM_ORGANIZATION"
 

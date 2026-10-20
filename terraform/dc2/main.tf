@@ -1,11 +1,12 @@
 provider "aws" {
-  region = "ap-southeast-2"
+  region              = var.aws_region
+  allowed_account_ids = var.aws_account_id == null ? null : [var.aws_account_id]
 
   default_tags {
     tags = {
       Project   = "AAP-TFE-Failover-Demo"
       ManagedBy = "Terraform"
-      Demo      = "Woolworths"
+      Demo      = "Datacentre-Failover"
     }
   }
 }
@@ -33,7 +34,7 @@ resource "aws_subnet" "dc2" {
     Name       = "${data.terraform_remote_state.shared.outputs.project_prefix}-dc2-subnet"
     Project    = "AAP-TFE-Failover-Demo"
     ManagedBy  = "Terraform"
-    Demo       = "Woolworths"
+    Demo       = "Datacentre-Failover"
     Datacentre = "dc2"
   }
 }
@@ -50,7 +51,7 @@ resource "aws_route_table" "dc2" {
     Name      = "${data.terraform_remote_state.shared.outputs.project_prefix}-dc2-public"
     Project   = "AAP-TFE-Failover-Demo"
     ManagedBy = "Terraform"
-    Demo      = "Woolworths"
+    Demo      = "Datacentre-Failover"
   }
 }
 

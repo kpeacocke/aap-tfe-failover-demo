@@ -7,7 +7,7 @@ independently managed HCP Terraform workspaces:
 
 | Workspace | Owns |
 | --- | --- |
-| `ww-demo-shared` | VPC, internet gateway, HAProxy subnet/host, Elastic IP, shared security group |
+| `ww-demo-shared` | VPC, internet gateway, HAProxy subnet/host, Elastic IP, shared security group, demo public-key registration |
 | `ww-demo-dc1` | DC1 subnet, route table, application security group, two DC1 instances |
 | `ww-demo-dc2` | DC2 subnet, route table, application security group, two DC2 instances |
 
@@ -16,6 +16,12 @@ with `terraform_remote_state`. HCP Terraform state sharing must be enabled for
 the two consumer workspaces. Each DC remains a separate state boundary so that
 future operational automation can quarantine one site without affecting the
 other.
+
+The dedicated SSH private key stays in the presenter's Git-ignored local
+directory and survives Terraform destroy. Terraform registers only the public
+key as a prefixed, tagged EC2 key pair and removes that registration on destroy.
+Recreation reuses the same local key; it does not depend on an existing lab
+private key or modify personal SSH credentials.
 
 ## Network and traffic
 
@@ -30,7 +36,8 @@ HAProxy :80 (public Elastic IP; SSH limited to administrator CIDR)
    +-- DC2 subnet: dc2-app-01, dc2-app-02 (TCP/8080)
 ```
 
-All resources are in `ap-southeast-2` by default. The app instances receive
+All resources use the verified RHDP lab AWS region, explicitly supplied through
+`TF_VAR_aws_region` in `.env`; no region is assumed. The app instances receive
 public IPs for operating-system package installation, but their security group
 accepts application traffic only from the HAProxy security group and has no
 inbound SSH rule. The subnet routing is public; the security-group boundary is

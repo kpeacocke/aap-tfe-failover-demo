@@ -8,7 +8,7 @@ Rules:
 
 - AAP 2.7 and OpenShift are pre-installed by RHDP. Never install or upgrade AAP or OpenShift.
 - Self-Service Automation Portal is an add-on managed by this project: detect it, deploy it onto the existing RHDP OpenShift cluster if missing, and reconcile/reuse it if already present.
-- Target HCP Terraform Free at `app.terraform.io` and AWS `ap-southeast-2`.
+- Target HCP Terraform Free at `app.terraform.io` and the verified AWS account/region of the supplied RHDP lab; require explicit region configuration rather than assuming Sydney.
 - In the RHDP path, deploy Portal on the existing OpenShift cluster; do not deploy a separate RHEL Portal appliance.
 - Verify the current supported AAP 2.7 Portal OpenShift installation method before implementing; do not invent CRDs, Helm values, OAuth settings, Routes, or Secrets.
 - For AAP configuration-as-code, follow the Red Hat `ansible/product-demos` pattern:

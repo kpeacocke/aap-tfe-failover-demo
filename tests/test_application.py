@@ -9,6 +9,11 @@ from application.app import DemoRequestHandler, health_response, homepage
 
 
 class DemoApplicationTests(unittest.TestCase):
+    def test_homepage_uses_generic_branding(self) -> None:
+        page = homepage()
+        self.assertIn("<title>Datacentre Failover Demo</title>", page)
+        self.assertIn("<h1>Datacentre Failover Demo</h1>", page)
+
     def test_health_response_includes_datacentre_and_hostname(self) -> None:
         with patch.dict(
             "os.environ",

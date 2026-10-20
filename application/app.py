@@ -28,7 +28,7 @@ def homepage() -> str:
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Woolworths Demo Service</title>
+    <title>Datacentre Failover Demo</title>
     <style>
       body {{ font: 1.2rem system-ui, sans-serif; margin: 3rem auto; max-width: 42rem; }}
       h1 {{ color: #176b3a; }}
@@ -37,7 +37,7 @@ def homepage() -> str:
     </style>
   </head>
   <body>
-    <h1>Woolworths Demo Service</h1>
+    <h1>Datacentre Failover Demo</h1>
     <section class="status">
       <strong>STATUS: HEALTHY</strong>
       <dl>

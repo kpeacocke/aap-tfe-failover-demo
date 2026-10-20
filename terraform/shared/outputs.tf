@@ -1,3 +1,13 @@
+output "ssh_key_pair_name" {
+  description = "EC2 key pair used for HAProxy administrator access."
+  value       = aws_instance.haproxy.key_name
+}
+
+output "aws_region" {
+  description = "AWS region where the shared infrastructure is deployed."
+  value       = var.aws_region
+}
+
 output "vpc_id" {
   description = "ID of the shared demo VPC."
   value       = aws_vpc.demo.id

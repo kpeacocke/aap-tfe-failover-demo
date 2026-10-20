@@ -43,7 +43,7 @@ resource "aws_security_group" "application" {
     Name      = "${var.project_prefix}-${var.datacentre_name}-apps"
     Project   = "AAP-TFE-Failover-Demo"
     ManagedBy = "Terraform"
-    Demo      = "Woolworths"
+    Demo      = "Datacentre-Failover"
   }
 }
 
@@ -80,7 +80,7 @@ resource "aws_instance" "application" {
     Name       = "${var.project_prefix}-${var.node_names[count.index]}"
     Project    = "AAP-TFE-Failover-Demo"
     ManagedBy  = "Terraform"
-    Demo       = "Woolworths"
+    Demo       = "Datacentre-Failover"
     Role       = "application"
     Datacentre = var.datacentre_name
   }

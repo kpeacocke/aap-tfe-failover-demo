@@ -13,7 +13,7 @@ chmod 0640 /opt/ww-demo/app.py
 
 cat > /etc/systemd/system/ww-demo-app.service <<'SYSTEMD_UNIT'
 [Unit]
-Description=Woolworths failover demo application
+Description=Datacentre failover demo application
 After=network.target
 
 [Service]

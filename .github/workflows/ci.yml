@@ -32,3 +32,9 @@ jobs:
           done
       - name: Test demo application
         run: python -m unittest discover -s tests -v
+      - name: Test Terraform environment configuration
+        run: bash tests/test-terraform-env.sh
+      - name: Test local SSH key lifecycle
+        run: bash tests/test-ssh-key.sh
+      - name: Test HCP workspace initialization
+        run: bash tests/test-workspace.sh

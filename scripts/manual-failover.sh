@@ -17,7 +17,10 @@ fi
 
 target_dc=$1
 haproxy_host=${2:-${HAPROXY_PUBLIC_IP:-}}
-ssh_key=${3:-${SSH_PRIVATE_KEY_PATH:-}}
+ssh_key=${3:-${SSH_PRIVATE_KEY_PATH:-$repo_root/.local/ssh/ww-demo}}
+if [[ "$ssh_key" != /* ]]; then
+    ssh_key="$repo_root/$ssh_key"
+fi
 
 case "$target_dc" in
     dc1|dc2) ;;

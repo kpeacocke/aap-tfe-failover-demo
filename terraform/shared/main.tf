@@ -1,11 +1,12 @@
 provider "aws" {
-  region = "ap-southeast-2"
+  region              = var.aws_region
+  allowed_account_ids = var.aws_account_id == null ? null : [var.aws_account_id]
 
   default_tags {
     tags = {
       Project   = "AAP-TFE-Failover-Demo"
       ManagedBy = "Terraform"
-      Demo      = "Woolworths"
+      Demo      = "Datacentre-Failover"
     }
   }
 }
@@ -38,7 +39,7 @@ locals {
   tags = {
     Project   = "AAP-TFE-Failover-Demo"
     ManagedBy = "Terraform"
-    Demo      = "Woolworths"
+    Demo      = "Datacentre-Failover"
   }
 
   dc1_app_ips = [
@@ -133,12 +134,30 @@ resource "aws_security_group" "haproxy" {
   })
 }
 
+resource "aws_key_pair" "presenter" {
+  count = var.ssh_key_pair_name == null ? 1 : 0
+
+  key_name_prefix = "${var.project_prefix}-presenter-"
+  public_key      = var.ssh_public_key
+
+  tags = merge(local.tags, {
+    Name = "${var.project_prefix}-presenter"
+  })
+
+  lifecycle {
+    precondition {
+      condition     = var.ssh_public_key != null
+      error_message = "Supply ssh_public_key, or an existing ssh_key_pair_name. Run scripts/create-ssh-key.sh for a local demo key."
+    }
+  }
+}
+
 resource "aws_instance" "haproxy" {
   ami                         = data.aws_ami.amazon_linux.id
   instance_type               = var.instance_type
   subnet_id                   = aws_subnet.haproxy.id
   vpc_security_group_ids      = [aws_security_group.haproxy.id]
-  key_name                    = var.ssh_key_pair_name
+  key_name                    = var.ssh_key_pair_name == null ? aws_key_pair.presenter[0].key_name : var.ssh_key_pair_name
   associate_public_ip_address = true
   user_data = templatefile("${path.module}/haproxy-user-data.sh.tftpl", {
     haproxy_config = templatefile("${path.module}/haproxy.cfg.tftpl", {
