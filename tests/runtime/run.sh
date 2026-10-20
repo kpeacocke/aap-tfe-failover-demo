@@ -10,7 +10,7 @@ cleanup() {
     local status=$?
     if [[ "$status" -ne 0 ]]; then
         echo "Runtime fixture failed (exit $status). Last test diagnostics:"
-        for log in deadline.log result.log haproxy-tcp.log; do
+        for log in deadline.log stage-rollback.log result.log haproxy-tcp.log; do
             if [[ -f "$fixture/$log" ]]; then
                 echo "--- $log ---"
                 tail -50 "$fixture/$log"
@@ -308,6 +308,7 @@ export AWS_CA_BUNDLE="$SSL_CERT_FILE" AWS_EC2_METADATA_DISABLED=true
 
 stage() {
     local requested_stage=$1
+    local status=0
     shift
     ansible-playbook -i "$fixture/inventory.json" tests/runtime/workflow-stage.yml \
         -e "@$fixture/workspaces.json" -e "runtime_operation_marker=$fixture/operation.lock" \
@@ -316,7 +317,9 @@ stage() {
         -e demo_reference=TEST-WORKFLOW -e demo_confirmation=CONFIRM \
         -e demo_target=dc2 -e demo_recovery_dc=dc1 \
         -e runtime_health_delay_seconds=1 -e runtime_health_retries=3 "$@" \
-        > "$fixture/result.log" 2>&1
+        > "$fixture/result.log" 2>&1 || status=$?
+    cp "$fixture/result.log" "$fixture/stage-$requested_stage.log"
+    return "$status"
 }
 for step in validate_request determine_state validate_target quarantine_source drain_source activate_target validate_service evidence_success; do
     if ! stage "$step"; then cat "$fixture/result.log"; exit 1; fi

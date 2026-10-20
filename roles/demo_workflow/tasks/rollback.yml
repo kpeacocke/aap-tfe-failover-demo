@@ -19,9 +19,10 @@
 - name: Default to human escalation without releasing quarantine
   ansible.builtin.set_fact:
     demo_workflow_state: "{{ demo_workflow_state | combine({'outcome': 'human_escalation', 'quarantine_retained': true}) }}"
+    demo_workflow_rollback_safe: "{{ application_health_healthy | length == 2 }}"
 
 - name: Attempt rollback only when both original source nodes are healthy
-  when: application_health_healthy | length == 2
+  when: demo_workflow_rollback_safe | bool
   block:
     - name: Activate only the healthy original source
       ansible.builtin.include_role:
