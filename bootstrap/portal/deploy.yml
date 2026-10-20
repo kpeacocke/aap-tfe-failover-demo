@@ -15,8 +15,6 @@
       api_key: "{{ demo_portal_cluster_token }}"
       validate_certs: "{{ demo_portal_validate_certs }}"
       ca_cert: "{{ demo_portal_ca_cert }}"
-    ansible.platform.application:
-      pkce_required: false
   tasks:
     - name: Inspect namespace ownership before any changes
       kubernetes.core.k8s_info:

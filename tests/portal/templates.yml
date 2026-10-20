@@ -37,5 +37,10 @@
           - "'catalog.location.create' not in demo_portal_test_policy"
           - "'permission.' not in demo_portal_test_policy"
           - "'user:default/ww-demo-operator' in demo_portal_test_policy"
+          - "'ansible.templates.view, use, allow' in demo_portal_test_policy"
+          - "'ansible.history.view, use, allow' in demo_portal_test_policy"
+          - "'ansible.execution-environments.view' not in demo_portal_test_policy"
+          - "'ansible.collections.view' not in demo_portal_test_policy"
+          - "'ansible.git-repositories.view' not in demo_portal_test_policy"
       vars:
         demo_portal_test_policy: "{{ lookup('ansible.builtin.file', '../../bootstrap/portal/policy.csv') }}"

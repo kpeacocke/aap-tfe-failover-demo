@@ -43,3 +43,17 @@
           - demo_portal_test_aap.controller_roles[0].users == ['ww-demo-portal-runner']
           - demo_portal_test_aap.controller_roles[0].workflows | sort == ['Demo - Datacentre Failover', 'Demo - Datacentre Recovery']
           - "'controller_applications' in demo_portal_test_aap.aap_configuration_dispatcher_exclude_roles"
+          - >-
+            demo_portal_test_aap.gateway_role_user_assignments |
+            selectattr('user', 'equalto', 'ww-demo-portal-runner') |
+            map(attribute='role_definition') | list == ['Organization Member']
+
+    - name: Load the actual runner credential schema
+      ansible.builtin.include_vars:
+        file: ../../bootstrap/portal/launcher-vars.yml
+        name: demo_portal_test_runner
+
+    - name: Require a nonempty timeout for the built-in credential injector
+      ansible.builtin.assert:
+        that:
+          - demo_portal_test_runner.controller_credentials[0].inputs.request_timeout | float > 0

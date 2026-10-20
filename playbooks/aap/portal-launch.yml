@@ -40,6 +40,7 @@
           ansible.builtin.fail:
             msg: >-
               Portal workflow failed or was not confirmed (workflow {{ demo_portal_workflow.id | default('unknown') }}).
+              {{ demo_portal_workflow.msg | default('No module error message was returned.') }}
               An administrator must inspect the real graph and evidence; quarantine and owned markers are never automatically cleared.
 
     - name: Publish the real workflow identity for retained Portal job evidence

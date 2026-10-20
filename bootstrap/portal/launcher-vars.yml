@@ -12,6 +12,7 @@ controller_credentials:
         {{ demo_portal_runner_secret.resources[0].data.token | b64decode
            if demo_portal_runner_secret.resources | length else demo_portal_runner_token.ansible_facts.aap_token.token }}
       verify_ssl: true
+      request_timeout: "30"
 controller_templates: "{{ lookup('ansible.builtin.template', 'launchers.json.j2') | from_json }}"
 controller_roles:
   - role: execute

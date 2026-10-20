@@ -27,6 +27,9 @@ aap_user_accounts:
     update_secrets: false
     organizations: ["{{ demo_portal_organization }}"]
 gateway_role_user_assignments:
+  - user: ww-demo-portal-runner
+    role_definition: Organization Member
+    object_ids: ["{{ demo_portal_organization }}"]
   - user: ww-demo-portal-catalog
     role_definition: Organization Admin
     object_ids: ["{{ demo_portal_organization }}"]

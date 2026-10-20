@@ -1,4 +1,6 @@
 p, role:default/ww-demo-operators, catalog.entity.read, read, allow
+p, role:default/ww-demo-operators, ansible.templates.view, use, allow
+p, role:default/ww-demo-operators, ansible.history.view, use, allow
 p, role:default/ww-demo-operators, scaffolder.template.parameter.read, read, allow
 p, role:default/ww-demo-operators, scaffolder.template.step.read, read, allow
 p, role:default/ww-demo-operators, scaffolder.action.execute, use, allow

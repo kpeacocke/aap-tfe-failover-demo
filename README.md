@@ -500,6 +500,40 @@ Verify operator OAuth login, exactly the two allowed templates, denied
 administration, and real Portal-launched failover/recovery before declaring
 Phase 5 complete. Phase 6 bootstrap/teardown remains out of scope.
 
+### Live Portal browser acceptance
+
+The optional Chromium tests exercise the real Portal SPA and AAP OAuth flow;
+they do not mock AAP or traffic. Install their pinned development-only tools:
+
+```bash
+npm --prefix tests/portal-browser ci
+(cd tests/portal-browser && npx playwright install chromium)
+```
+
+Set `DEMO_PORTAL_URL` to the verified HTTPS URL in private `.env`, then run:
+
+```bash
+bash tests/test-portal-browser.sh
+```
+
+This checks OAuth login, persisted two-template visibility, invalid/anonymous
+authentication, and denied import/administration. The operation test is skipped
+unless explicitly enabled:
+
+```bash
+DEMO_PORTAL_LIVE_OPERATIONS=true bash tests/test-portal-browser.sh
+```
+
+**The enabled operation test changes real traffic.** It requires DC1 initially
+active and both nodes healthy, fails over to DC2, recovers DC1 without changing
+traffic, switches back to DC1 and recovers DC2. Each operation has a unique
+incident reference and verifies both active nodes through the public front door.
+On failure it stops; it never clears quarantine/markers or automatically attempts
+a compensating switch. Inspect the retained Portal task and real AAP graph
+before retrying. Keep the generated operator password file or explicitly supply
+`DEMO_OPERATOR_PASSWORD`. Tests do not save browser authentication state or traces;
+failure screenshots/results remain ignored locally.
+
 ## Validate locally
 
 ```bash

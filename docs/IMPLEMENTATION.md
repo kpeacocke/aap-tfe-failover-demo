@@ -1964,11 +1964,21 @@ missing catalog token; existing OAuth credentials and tokens are reused.
 The token module's published authentication fact is reset to the supplied
 administrator authentication before reconciling launcher resources. The
 existing demo SCM project is synchronized before checking the new playbook.
+The runner also has the demo organization's verified `Organization Member`
+directory role (`view_organization`/`view_team`), needed by the supported
+workflow-launch module to resolve the organization name. It has no inventory,
+credential or administrative grants. Its built-in AAP credential explicitly
+sets `request_timeout: "30"` so an empty injected environment value cannot fail
+module argument parsing before launch.
 
 Only the two custom Git-backed templates are registered; automatic job-template
 catalog synchronization is disabled to avoid publishing the internal stages.
 Portal RBAC grants the demo operator template read/execute, not catalog import
 or administration. Existing AAP/OpenShift installations remain unchanged.
+The Portal-specific `ansible.templates.view` and `ansible.history.view`
+permissions expose only the Templates and History navigation/routes; execution
+environment, collection and repository navigation remain denied. OAuth uses
+the native PKCE flow with `pkce_required=true`.
 
 Testing strategy: render the pinned real Helm chart without credentials and
 assert OCI mode, TLS verification, fixed catalog locations, survey/action
@@ -1978,6 +1988,12 @@ deployment health, repeat reconciliation, OAuth login, a two-template
 restricted catalog, denied administration and Portal-launched failover/recovery.
 Use the shared browser for the actual SPA/OAuth flows and real AAP/cluster
 services, not UI mocks. Runtime/API faults remain covered by Phase 4 fixtures.
+Optional pinned Chromium tests in `tests/portal-browser` exercise real OAuth,
+catalog persistence and denied administration. Traffic-changing acceptance is
+explicitly gated by `DEMO_PORTAL_LIVE_OPERATIONS=true`; it runs failover,
+recovery, switchback and final recovery against the actual front door and stops
+without clearing operational guards on any failure. Browser authentication
+state and traces are not saved.
 No existing Portal browser tests were present; new Portal-specific validation
 is wired into the current CI workflow. No Phase 6 bootstrap/teardown is added.
 
