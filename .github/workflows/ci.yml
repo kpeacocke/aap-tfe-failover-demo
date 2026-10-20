@@ -53,6 +53,7 @@ jobs:
           mkdir -p .local/aap-collections/ansible_collections
           container=$(docker create ww-demo-aap-ee:phase4 /bin/true)
           docker cp "$container:/usr/share/ansible/collections/ansible_collections/ansible" .local/aap-collections/ansible_collections/
+          docker cp "$container:/usr/share/ansible/collections/ansible_collections/kubernetes" .local/aap-collections/ansible_collections/
           docker rm "$container"
       - name: Lint Ansible runtime automation
         run: |
