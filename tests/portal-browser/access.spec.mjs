@@ -17,6 +17,9 @@ test('anonymous and invalid credentials cannot access the catalog', async ({ pag
 
 test('operator cannot import catalog content or administer permissions', async ({ page }) => {
   const request = await signIn(page);
+  await expect(request('https://example.invalid/')).rejects.toThrow(
+    'Authenticated Portal requests must remain on the configured Portal origin.',
+  );
   const before = await request('/api/catalog/entities?filter=kind=template');
   expect(before.status()).toBe(200);
   const beforeIds = (await before.json()).map(entity => entity.metadata.uid).sort();

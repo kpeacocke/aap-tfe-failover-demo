@@ -534,6 +534,23 @@ before retrying. Keep the generated operator password file or explicitly supply
 `DEMO_OPERATOR_PASSWORD`. Tests do not save browser authentication state or traces;
 failure screenshots/results remain ignored locally.
 
+If AAP loses an execution worker, do not rerun the full traffic-changing test
+against retained guards. An administrator must first inspect the owning
+workflow and every child job, the marker's `request.json`, actual HAProxy/site
+health, and the incident-owned workspace quarantine. Archive the evidence
+before any approved stale-marker removal; never remove an active workflow's
+marker or force-unlock a workspace. Once safe, submit only the interrupted
+standby's **Recovery** form with its **original** incident reference, retaining
+quarantine until that workflow validates and releases it. Repeat full acceptance
+only after the original incident is completely closed.
+
+Phase 5 acceptance on the supplied RHDP lab is complete: all four browser tests,
+including failover/recovery in both directions, passed. Final state is healthy
+DC1, both sites healthy, no retained marker or workspace quarantine, and three
+no-change Terraform plans. See [the implementation acceptance record](docs/IMPLEMENTATION.md#phase-5)
+for workflow IDs and the safely resolved earlier worker interruption.
+Repeat these checks for each recreated environment. Phase 6 remains unimplemented.
+
 ## Validate locally
 
 ```bash

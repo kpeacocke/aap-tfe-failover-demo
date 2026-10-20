@@ -1993,9 +1993,38 @@ catalog persistence and denied administration. Traffic-changing acceptance is
 explicitly gated by `DEMO_PORTAL_LIVE_OPERATIONS=true`; it runs failover,
 recovery, switchback and final recovery against the actual front door and stops
 without clearing operational guards on any failure. Browser authentication
-state and traces are not saved.
+state and traces are not saved. Login must reach the default catalog landing
+without a forced navigation; credentials and authenticated API requests are
+restricted to their configured AAP and Portal origins respectively.
+An execution-worker interruption requires administrator inspection of terminal
+workflow/child-job state, marker ownership, actual traffic/site health and the
+original quarantine before any approved stale-marker clearance. Quarantine
+remains in place until a Portal recovery using the original incident reference
+validates and releases it. A failed full browser suite remains failed evidence;
+repeat the complete sequence from a clean state before accepting Phase 5.
 No existing Portal browser tests were present; new Portal-specific validation
 is wired into the current CI workflow. No Phase 6 bootstrap/teardown is added.
+
+Phase 5 live acceptance is complete on the supplied RHDP lab:
+
+- All four real Chromium tests passed, including the complete traffic-changing
+  sequence (exit 0, 30.7 minutes).
+- Portal launched successful workflows 167 (DC2 failover, eight stage jobs),
+  181 (DC1 recovery, nine), 196 (DC1 switchback, eight), and 211 (DC2 recovery,
+  nine). Consumer launcher jobs belong to the restricted operator; workflows
+  belong to the dedicated demo runner.
+- An earlier external execution-worker interruption failed workflow 145.
+  Its guards were retained, inspected and archived; only its stale marker was
+  cleared with explicit administrator approval, without force-unlocking.
+  Original-reference Portal recovery 151 succeeded before the full fresh
+  acceptance run above. The failed historical run is retained as failed evidence.
+- Final state: healthy DC1 traffic through both nodes, all four application
+  nodes healthy, no operation marker, all three workspaces unlocked, and three
+  normal-locking Terraform plans with no changes (each detailed exit code 0).
+- Portal reconciliation reused credentials unchanged; OAuth/PKCE, the default
+  catalog landing, exact two-template visibility and denied administration
+  passed. Neither AAP nor OpenShift was installed or upgraded; incident recovery
+  did not change platform settings.
 
 ## Phase 6
 
