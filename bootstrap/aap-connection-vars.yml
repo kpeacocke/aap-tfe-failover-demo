@@ -4,3 +4,5 @@ aap_username: "{{ lookup('ansible.builtin.env', 'AAP_USERNAME') }}"
 aap_password: "{{ lookup('ansible.builtin.env', 'AAP_PASSWORD') }}"
 aap_token: "{{ lookup('ansible.builtin.env', 'AAP_TOKEN') }}"
 aap_validate_certs: "{{ lookup('ansible.builtin.env', 'AAP_VALIDATE_CERTS') | default('true', true) | bool }}"
+aap_configuration_async_dir: /tmp/ww-demo-aap-async
+ansible_async_dir: "{{ aap_configuration_async_dir }}"

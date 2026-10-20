@@ -22,6 +22,8 @@ jobs:
           python-version: "3.12"
       - name: Lint shell scripts
         uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          check_together: "yes"
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive terraform
       - name: Validate Terraform roots
