@@ -1,0 +1,100 @@
+---
+- name: Execute actual platform ownership assertions without credentials or mutation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    lifecycle_aap_org:
+      json:
+        results: [{id: 3}]
+    lifecycle_object:
+      endpoint: projects
+      names: [Demo | Datacentre Failover]
+    lifecycle_good_project:
+      name: Demo | Datacentre Failover
+      organization: 3
+      description: Demo-managed public source; no GitHub credential is needed.
+      scm_url: https://github.com/kpeacocke/aap-tfe-failover-demo.git
+  tasks:
+    - name: Allocate the actual production platform guard fixture
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -lifecycle-platform.yml
+      register: lifecycle_platform_guard
+
+    - name: Exercise platform ownership checks and retention policy
+      block:
+        - name: Select only the production object-ownership assertions
+          ansible.builtin.copy:
+            dest: "{{ lifecycle_platform_guard.path }}"
+            content: >-
+              {{ lookup('ansible.builtin.file', '../../bootstrap/lifecycle/inspect-objects.yml') | from_yaml
+                 | rejectattr('name', 'equalto', 'Inspect all objects of the selected class in the exact demo organization')
+                 | list | to_nice_yaml }}
+            mode: "0600"
+
+        - name: Model an exact owned project
+          ansible.builtin.set_fact:
+            lifecycle_aap_objects:
+              json:
+                count: 1
+                next: null
+                results: ["{{ lifecycle_good_project }}"]
+
+        - name: Accept only the owned allowlisted project
+          ansible.builtin.include_tasks: "{{ lifecycle_platform_guard.path }}"
+
+        - name: Reject same-named foreign source rather than deleting it
+          block:
+            - name: Model an unrelated repository behind the demo project name
+              ansible.builtin.set_fact:
+                lifecycle_aap_objects:
+                  json:
+                    count: 1
+                    next: null
+                    results: ["{{ lifecycle_good_project | combine({'scm_url': 'https://example.invalid/unrelated.git'}) }}"]
+            - name: Execute the actual ownership assertions
+              ansible.builtin.include_tasks: "{{ lifecycle_platform_guard.path }}"
+            - name: Fail if an unrelated repository was accepted
+              ansible.builtin.fail:
+                msg: TEST FAILURE - unrelated project accepted.
+          rescue:
+            - name: Require the production ownership assertion to reject the unrelated project
+              ansible.builtin.assert:
+                that:
+                  - ansible_failed_task.name == 'Require an explicit project ownership marker on every object'
+
+        - name: Reject incomplete paginated inventory before any removal
+          block:
+            - name: Model an incomplete inventory
+              ansible.builtin.set_fact:
+                lifecycle_aap_objects:
+                  json:
+                    count: 2
+                    next: /api/controller/v2/projects/?page=2
+                    results: ["{{ lifecycle_good_project }}"]
+            - name: Execute the actual pagination assertion
+              ansible.builtin.include_tasks: "{{ lifecycle_platform_guard.path }}"
+            - name: Fail if a partial inventory was accepted
+              ansible.builtin.fail:
+                msg: TEST FAILURE - partial inventory accepted.
+          rescue:
+            - name: Require the production pagination assertion to reject the partial inventory
+              ansible.builtin.assert:
+                that:
+                  - ansible_failed_task.name == 'Refuse pagination or unrecognized objects in the demo organization'
+
+        - name: Require conservative identity and namespace retention
+          ansible.builtin.assert:
+            that:
+              - >-
+                (lookup('ansible.builtin.file', '../../bootstrap/lifecycle/cleanup-vars.yml') | from_yaml).demo_lifecycle_objects
+                | map(attribute='endpoint') | intersect(['users', 'organizations', 'teams', 'credential_types']) | length == 0
+              - >-
+                lookup('ansible.builtin.file', '../../bootstrap/lifecycle-cleanup.yml')
+                is not search('kind: Namespace')
+      always:
+        - name: Remove only the allocated platform assertion fixture
+          ansible.builtin.file:
+            path: "{{ lifecycle_platform_guard.path }}"
+            state: absent

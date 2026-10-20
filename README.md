@@ -549,7 +549,88 @@ including failover/recovery in both directions, passed. Final state is healthy
 DC1, both sites healthy, no retained marker or workspace quarantine, and three
 no-change Terraform plans. See [the implementation acceptance record](docs/IMPLEMENTATION.md#phase-5)
 for workflow IDs and the safely resolved earlier worker interruption.
-Repeat these checks for each recreated environment. Phase 6 remains unimplemented.
+Repeat these checks for each recreated environment.
+
+## Phase 6: bootstrap and guarded teardown
+
+The lifecycle entrypoints orchestrate the existing components; they never
+install or upgrade RHDP AAP/OpenShift. Requirements: Python 3.12-3.14,
+Terraform 1.9.x, a working Docker daemon, Git, curl, jq and OpenSSH tools.
+Set `BOOTSTRAP_PYTHON=python3.14` if your default Python is newer.
+An isolated `.local/lifecycle-venv` is created automatically.
+
+Keep [profiles/demo.yml](profiles/demo.yml) non-secret. It deliberately supports
+the existing `ww-demo` topology, one named HCP project and Portal enabled.
+Endpoints/credentials stay in private `.env`; the explicit
+`TF_VAR_aws_account_id` and verified `TF_VAR_aws_region` are mandatory.
+
+```bash
+# Initial provisioning or explicitly approved infrastructure changes:
+./scripts/bootstrap.sh profiles/demo.yml --apply
+
+# Repeat reconciliation; fails rather than applying infrastructure drift:
+./scripts/bootstrap.sh profiles/demo.yml
+
+# Read-only teardown preflight: inspect jobs/guards/ownership and destroy plans.
+./scripts/teardown.sh profiles/demo.yml
+```
+
+Bootstrap creates missing local-execution workspaces, creates/reuses the HCP
+project, adds the two DC shared-state consumers, provisions shared/DC1/DC2 in
+order, discovers the actual front door/image digest, then reconciles existing
+AAP content and Portal. It reuses local keys, operator password and namespaced
+Portal credentials; `.env` is not rewritten. Local execution uses the normal
+AWS credential chain (including session tokens), not uploaded workspace secrets.
+Reconciliation can still update demo metadata; without `--apply` only AWS
+infrastructure changes and missing HCP resource creation are blocked.
+
+For a fresh/recreated HAProxy host, verify its SSH fingerprint through a trusted
+EC2 console/source and add the verified key to `SSH_KNOWN_HOSTS_PATH` (default
+`~/.ssh/known_hosts`). Bootstrap stops clearly at this trust boundary and can be
+rerun. It never accepts blind `ssh-keyscan` output. Supply the verified AAP
+execution-egress `/32` as described in Phase 4 before expecting remote SSH
+operations to work.
+
+### Destructive teardown requires a separate confirmation
+
+**This takes the demo offline and destroys its AWS infrastructure:**
+
+```bash
+./scripts/teardown.sh profiles/demo.yml --confirm-destroy
+```
+
+It refuses any active AAP job, locked or remote-execution workspace, retained
+operation marker, unrecognized object, or non-demo Terraform resource. It
+never force-unlocks, cancels jobs or automatically releases quarantine.
+After approval it reserves the HAProxy operation marker, applies saved destroy
+plans in **DC1 → DC2 → shared** order, and removes verified demo AAP templates,
+inventory, project, credentials and EE reference through the supported
+dispatcher. Only the pinned demo Helm release and labelled execution-image
+objects are removed; namespaces are never deleted.
+
+Intentionally retained for safe reuse: AAP identity/organization/team shells,
+global credential type, Portal OAuth/identity Secrets and PVCs, namespaces,
+HCP project, and local keys/operator password. HCP workspace history is also
+retained by default. Set `terraform.retain_history: false` in the profile to use
+HCP's safe-delete action on the empty workspaces after successful destruction.
+This is **not** a purge of reusable credentials or storage.
+
+If destruction fails, stop and inspect its saved evidence and marker ownership.
+Do not blindly clear the marker or retry with force unlock. An interrupted
+teardown requires administrator review before explicitly clearing its stale
+marker and resuming. Avoid concurrent out-of-band administrative changes.
+
+Phase 6 live validation is limited, by presenter choice, to bootstrap
+reconciliation and non-destructive teardown preflight. Destructive
+teardown/recreation has **not** been run against the lab.
+Those non-destructive checks passed, including repeat credential reuse, all
+three real destroy-plan ownership checks and three restricted-browser tests.
+The existing demo remains healthy on DC1 with all workspaces unlocked.
+
+```bash
+# Credential-free production-task regression tests:
+bash tests/test-lifecycle.sh
+```
 
 ## Validate locally
 

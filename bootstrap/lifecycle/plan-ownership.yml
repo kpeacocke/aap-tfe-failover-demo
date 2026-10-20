@@ -1,0 +1,20 @@
+---
+- name: Require only the implemented AWS resource addresses and demo tags
+  ansible.builtin.assert:
+    that:
+      - >-
+        (lifecycle_site == 'shared' and lifecycle_resource.address in [
+          'aws_eip.haproxy', 'aws_eip_association.haproxy', 'aws_instance.haproxy',
+          'aws_internet_gateway.demo', 'aws_key_pair.presenter[0]', 'aws_route_table.haproxy',
+          'aws_route_table_association.haproxy', 'aws_security_group.haproxy', 'aws_subnet.haproxy', 'aws_vpc.demo']) or
+        (lifecycle_site in ['dc1', 'dc2'] and lifecycle_resource.address in [
+          'aws_route_table.' ~ lifecycle_site, 'aws_route_table_association.' ~ lifecycle_site,
+          'aws_subnet.' ~ lifecycle_site, 'module.application.aws_instance.application[0]',
+          'module.application.aws_instance.application[1]', 'module.application.aws_security_group.application'])
+      - >-
+        lifecycle_resource.change.before is none or
+        lifecycle_resource.type in ['aws_eip_association', 'aws_route_table_association'] or
+        (lifecycle_resource.change.before.tags_all.Project == 'AAP-TFE-Failover-Demo' and
+         lifecycle_resource.change.before.tags_all.ManagedBy == 'Terraform' and
+         lifecycle_resource.change.before.tags_all.Demo == 'Datacentre-Failover')
+    fail_msg: Saved plan contains a non-demo resource; refusing lifecycle apply.

@@ -56,6 +56,8 @@ jobs:
           docker cp "$container:/usr/share/ansible/collections/ansible_collections/ansible" .local/aap-collections/ansible_collections/
           docker cp "$container:/usr/share/ansible/collections/ansible_collections/kubernetes" .local/aap-collections/ansible_collections/
           docker rm "$container"
+      - name: Test lifecycle approval, saved-plan and ownership guards
+        run: bash tests/test-lifecycle.sh
       - name: Lint Ansible runtime automation
         run: |
           export ANSIBLE_COLLECTIONS_PATH="$PWD/.local/aap-collections:$HOME/.ansible/collections"
@@ -63,6 +65,8 @@ jobs:
           yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap playbooks roles tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
           ansible-lint bootstrap/portal/check.yml bootstrap/portal/deploy.yml bootstrap/portal/verify.yml playbooks/aap/portal-launch.yml tests/portal
           yamllint -d '{extends: default, rules: {line-length: disable}}' portal tests/portal
+          ansible-lint bootstrap/bootstrap.yml bootstrap/teardown.yml bootstrap/lifecycle-platform.yml bootstrap/lifecycle-cleanup.yml bootstrap/lifecycle tests/lifecycle profiles
+          yamllint -d '{extends: default, rules: {line-length: disable}}' profiles tests/lifecycle
       - name: Test Terraform API integration without cloud credentials
         run: bash tests/test-terraform-api.sh
       - name: Test runtime failover and failure handling without cloud credentials

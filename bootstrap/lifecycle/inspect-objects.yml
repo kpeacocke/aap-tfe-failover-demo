@@ -1,0 +1,28 @@
+---
+- name: Inspect all objects of the selected class in the exact demo organization
+  ansible.builtin.uri:
+    url: >-
+      {{ aap_hostname }}/api/controller/v2/{{ lifecycle_object.endpoint }}/?organization={{ lifecycle_aap_org.json.results[0].id }}&page_size=200
+  register: lifecycle_aap_objects
+  no_log: true
+
+- name: Refuse pagination or unrecognized objects in the demo organization
+  ansible.builtin.assert:
+    that:
+      - lifecycle_aap_objects.json.next is none
+      - lifecycle_aap_objects.json.count == lifecycle_aap_objects.json.results | length
+      - lifecycle_aap_objects.json.results | map(attribute='name') | difference(lifecycle_object.names) | length == 0
+    fail_msg: Unrecognized or paginated {{ lifecycle_object.endpoint }} found. No lifecycle cleanup is safe.
+
+- name: Require an explicit project ownership marker on every object
+  ansible.builtin.assert:
+    that:
+      - item.description is match('Demo-managed ')
+      - item.organization == lifecycle_aap_org.json.results[0].id
+      - >-
+        lifecycle_object.endpoint != 'projects' or
+        item.scm_url | default('') == 'https://github.com/kpeacocke/aap-tfe-failover-demo.git'
+    fail_msg: Object {{ item.name }} is not demonstrably created by this project.
+  loop: "{{ lifecycle_aap_objects.json.results }}"
+  loop_control:
+    label: "{{ item.name }}"

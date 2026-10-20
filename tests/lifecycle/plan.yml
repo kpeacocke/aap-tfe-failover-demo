@@ -1,0 +1,14 @@
+---
+- name: Exercise the real lifecycle saved-plan tasks against a fake Terraform executable
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    lifecycle_site: shared
+    lifecycle_environment: {}
+    lifecycle_root: "{{ lookup('ansible.builtin.env', 'LIFECYCLE_FIXTURE_ROOT') }}"
+    lifecycle_operation: "{{ lookup('ansible.builtin.env', 'LIFECYCLE_FIXTURE_OPERATION') }}"
+    lifecycle_approved: "{{ lookup('ansible.builtin.env', 'LIFECYCLE_FIXTURE_APPROVED') | bool }}"
+  tasks:
+    - name: Run the unchanged production saved-plan and ownership tasks
+      ansible.builtin.include_tasks: ../../bootstrap/lifecycle/terraform.yml

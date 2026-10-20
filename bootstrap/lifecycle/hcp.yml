@@ -1,0 +1,91 @@
+---
+- name: Read HCP projects by exact name
+  ansible.builtin.uri:
+    url: "{{ lifecycle_hcp }}/organizations/{{ lifecycle_org }}/projects?filter%5Bnames%5D={{ lifecycle_profile.terraform.project }}"
+    headers:
+      Authorization: "Bearer {{ lifecycle_token }}"
+      Content-Type: application/vnd.api+json
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  register: lifecycle_projects
+  no_log: true
+
+- name: Require unambiguous exact project lookup
+  ansible.builtin.assert:
+    that:
+      - lifecycle_projects.json.data | length <= 1
+      - >-
+        lifecycle_projects.json.data | length == 0 or
+        lifecycle_projects.json.data[0].attributes.name == lifecycle_profile.terraform.project
+      - lifecycle_projects.json.data | length == 1 or lifecycle_approved | bool
+    fail_msg: HCP project is absent or ambiguous. Use --apply to create the dedicated project.
+
+- name: Create only the missing dedicated HCP project
+  ansible.builtin.uri:
+    url: "{{ lifecycle_hcp }}/organizations/{{ lifecycle_org }}/projects"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lifecycle_token }}"
+      Content-Type: application/vnd.api+json
+    body_format: json
+    body:
+      data:
+        type: projects
+        attributes:
+          name: "{{ lifecycle_profile.terraform.project }}"
+          description: Demo-managed datacentre failover workspaces.
+    status_code: 201
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  register: lifecycle_project_created
+  no_log: true
+  when: lifecycle_projects.json.data | length == 0
+
+- name: Retain the verified HCP project ID
+  ansible.builtin.set_fact:
+    lifecycle_project_id: >-
+      {{ lifecycle_projects.json.data[0].id if lifecycle_projects.json.data | length
+         else lifecycle_project_created.json.data.id }}
+
+- name: Reconcile only the demo workspaces into the selected project
+  ansible.builtin.uri:
+    url: "{{ lifecycle_hcp }}/workspaces/{{ lifecycle_workspace_ids[item] }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ lifecycle_token }}"
+      Content-Type: application/vnd.api+json
+    body_format: json
+    body:
+      data:
+        type: workspaces
+        id: "{{ lifecycle_workspace_ids[item] }}"
+        relationships:
+          project:
+            data:
+              type: projects
+              id: "{{ lifecycle_project_id }}"
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  loop: "{{ lifecycle_sites }}"
+  no_log: true
+
+- name: Add only the two required shared-state consumers without replacing others
+  ansible.builtin.uri:
+    url: "{{ lifecycle_hcp }}/workspaces/{{ lifecycle_workspace_ids.shared }}/relationships/remote-state-consumers"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lifecycle_token }}"
+      Content-Type: application/vnd.api+json
+    body_format: json
+    body:
+      data:
+        - {type: workspaces, id: "{{ lifecycle_workspace_ids.dc1 }}"}
+        - {type: workspaces, id: "{{ lifecycle_workspace_ids.dc2 }}"}
+    status_code: [200, 204]
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  no_log: true

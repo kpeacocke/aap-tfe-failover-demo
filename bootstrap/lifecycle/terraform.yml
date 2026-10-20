@@ -1,0 +1,64 @@
+---
+- name: Create a private plan directory
+  ansible.builtin.tempfile:
+    state: directory
+    path: "{{ lifecycle_root }}/.local/lifecycle"
+    prefix: "{{ lifecycle_operation }}-{{ lifecycle_site }}-"
+  register: lifecycle_plan_directory
+
+- name: Plan and apply only the inspected saved Terraform plan
+  block:
+    - name: Validate the existing Terraform root
+      ansible.builtin.command:
+        argv: [terraform, "-chdir={{ lifecycle_root }}/terraform/{{ lifecycle_site }}", validate, -no-color]
+      changed_when: false
+
+    - name: Save the normal-locking Terraform plan
+      ansible.builtin.command:
+        argv: >-
+          {{ ['bash', 'scripts/terraform.sh', lifecycle_site, 'plan', '-input=false', '-no-color',
+              '-detailed-exitcode', '-lock-timeout=0s', '-out=' ~ lifecycle_plan_directory.path ~ '/plan']
+              + (['-destroy'] if lifecycle_operation == 'teardown' else []) }}
+        chdir: "{{ lifecycle_root }}"
+      environment: "{{ lifecycle_environment }}"
+      register: lifecycle_plan
+      failed_when: lifecycle_plan.rc not in [0, 2]
+      changed_when: false
+
+    - name: Require explicit approval before applying any infrastructure changes
+      ansible.builtin.assert:
+        that:
+          - lifecycle_plan.rc == 0 or lifecycle_approved | bool or lifecycle_operation == 'teardown'
+        fail_msg: >-
+          Terraform proposes changes for {{ lifecycle_site }}. Inspect the plan above, then rerun bootstrap
+          with --apply to authorize provisioning. Nothing was applied.
+
+    - name: Read the saved plan for project-ownership verification without printing state
+      ansible.builtin.command:
+        argv: [terraform, "-chdir={{ lifecycle_root }}/terraform/{{ lifecycle_site }}", show, -json, "{{ lifecycle_plan_directory.path }}/plan"]
+      register: lifecycle_plan_json
+      changed_when: false
+      no_log: true
+
+    - name: Verify ownership of every existing managed resource in the saved plan
+      ansible.builtin.include_tasks: plan-ownership.yml
+      loop: "{{ (lifecycle_plan_json.stdout | from_json).resource_changes | default([]) | selectattr('mode', 'equalto', 'managed') | list }}"
+      loop_control:
+        loop_var: lifecycle_resource
+        label: "{{ lifecycle_resource.address }}"
+
+    - name: Apply only this saved plan with normal state locking
+      ansible.builtin.command:
+        argv: [bash, scripts/terraform.sh, "{{ lifecycle_site }}", apply, -input=false, -no-color, -lock-timeout=0s,
+               "{{ lifecycle_plan_directory.path }}/plan"]
+        chdir: "{{ lifecycle_root }}"
+      environment: "{{ lifecycle_environment }}"
+      changed_when: true
+      when:
+        - lifecycle_plan.rc == 2
+        - lifecycle_approved | bool
+  always:
+    - name: Remove only the private temporary plan directory
+      ansible.builtin.file:
+        path: "{{ lifecycle_plan_directory.path }}"
+        state: absent

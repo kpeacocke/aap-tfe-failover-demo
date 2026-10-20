@@ -1,0 +1,30 @@
+---
+- name: Clear earlier class declarations before a bounded dispatcher call
+  ansible.builtin.set_fact:
+    controller_workflows: []
+    controller_templates: []
+    controller_inventories: []
+    controller_projects: []
+    controller_credentials: []
+    controller_execution_environments: []
+    lifecycle_absent_objects: []
+
+- name: Declare only exact demo objects absent
+  ansible.builtin.set_fact:
+    lifecycle_absent_objects: >-
+      {{ lifecycle_absent_objects + [{'name': item, 'organization': demo_lifecycle_org_name, 'state': 'absent'}] }}
+  loop: "{{ lifecycle_object.names }}"
+
+- name: Publish the single verified dispatcher variable
+  ansible.builtin.set_fact:
+    "{{ lifecycle_object.variable }}": "{{ lifecycle_absent_objects }}"
+
+- name: Reconcile only this verified object class through the supported dispatcher
+  ansible.builtin.include_role:
+    name: infra.aap_configuration.dispatch
+  vars:
+    aap_configuration_secure_logging: true
+    aap_configuration_dispatcher_roles:
+      - role: "{{ lifecycle_object.role }}"
+        var: "{{ lifecycle_object.variable }}"
+        tags: [lifecycle_cleanup]

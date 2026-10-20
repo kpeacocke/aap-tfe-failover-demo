@@ -17,6 +17,12 @@ case "${1:-}" in
     portal-check) playbook=portal/check.yml ;;
     portal-install) playbook=portal/deploy.yml ;;
     portal-verify) playbook=portal/verify.yml ;;
+    lifecycle-bootstrap) playbook=lifecycle-platform.yml ;;
+    lifecycle-inspect) playbook=lifecycle-cleanup.yml ;;
+    lifecycle-remove)
+        playbook=lifecycle-cleanup.yml
+        request_vars=(-e demo_lifecycle_remove=true)
+        ;;
     failover|recovery)
         if [[ "$#" -lt 3 || "$#" -gt 4 || ! "$2" =~ ^dc[12]$ || ! "$3" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
             echo "Usage: bash scripts/aap-configure.sh <failover|recovery> <dc1|dc2> <reference> [planned|failure]" >&2
@@ -38,8 +44,12 @@ if [[ "$playbook" == build-ee.yml ]]; then
     DEMO_EE_SOURCE_REVISION=$(git -C "$repo_root" rev-parse HEAD)
     export DEMO_EE_SOURCE_REVISION
 fi
+if [[ "$playbook" == lifecycle-platform.yml ]]; then
+    HAPROXY_PUBLIC_IP=${DEMO_LIFECYCLE_FRONTDOOR:?Lifecycle requires the discovered front door}
+    export HAPROXY_PUBLIC_IP
+fi
 docker build -f "$repo_root/execution-environment/Containerfile" -t ww-demo-aap-ee:phase4 "$repo_root"
-if [[ "$playbook" == install-demo.yml && -z "${DEMO_OPERATOR_PASSWORD:-}" ]]; then
+if [[ "$playbook" =~ ^(install-demo|lifecycle-platform).yml$ && -z "${DEMO_OPERATOR_PASSWORD:-}" ]]; then
     umask 077
     mkdir -p "$repo_root/.local"
     operator_password_file="$repo_root/.local/aap-operator-password"
@@ -63,7 +73,7 @@ if [[ -n "${OPENSHIFT_CA_CERT:-}" ]]; then
     args+=(--mount "type=bind,src=$OPENSHIFT_CA_CERT,dst=/run/demo-cluster-ca,readonly"
         -e OPENSHIFT_CA_CERT=/run/demo-cluster-ca)
 fi
-if [[ "$playbook" == install-demo.yml ]]; then
+if [[ "$playbook" =~ ^(install-demo|lifecycle-platform).yml$ ]]; then
     key=${SSH_PRIVATE_KEY_PATH:-.local/ssh/ww-demo}
     if [[ "$key" != /* ]]; then key="$repo_root/$key"; fi
     known_hosts=${SSH_KNOWN_HOSTS_PATH:-"$HOME/.ssh/known_hosts"}

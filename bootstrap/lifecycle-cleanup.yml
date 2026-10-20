@@ -1,0 +1,151 @@
+---
+- name: Verify the existing platform before inspecting demo cleanup
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Inspect and optionally remove only verified demo-owned platform content
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+    - portal/vars.yml
+    - lifecycle/cleanup-vars.yml
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ aap_username if not aap_token else omit }}"
+      url_password: "{{ aap_password if not aap_token else omit }}"
+      force_basic_auth: "{{ not aap_token }}"
+      headers: "{{ {'Authorization': 'Bearer ' ~ aap_token} if aap_token else {} }}"
+      validate_certs: "{{ aap_validate_certs }}"
+      follow_redirects: none
+      unredirected_headers: [Authorization]
+      timeout: 30
+    group/kubernetes.core.k8s:
+      host: "{{ demo_portal_cluster_api }}"
+      api_key: "{{ demo_portal_cluster_token }}"
+      validate_certs: "{{ demo_portal_validate_certs }}"
+      ca_cert: "{{ demo_portal_ca_cert }}"
+  tasks:
+    - name: Inspect all active platform jobs conservatively
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/controller/v2/unified_jobs/?status__in=new,pending,waiting,running&page_size=1"
+      register: lifecycle_active_jobs
+      no_log: true
+
+    - name: Require no active AAP execution before lifecycle changes
+      ansible.builtin.assert:
+        that:
+          - lifecycle_active_jobs.json.count == 0
+        fail_msg: AAP has active jobs. Wait for completion; lifecycle does not cancel jobs or clear operational guards.
+
+    - name: Resolve only the exact demo organization
+      ansible.builtin.uri:
+        url: "{{ aap_hostname }}/api/controller/v2/organizations/?name={{ demo_lifecycle_org_name | urlencode }}"
+      register: lifecycle_aap_org
+      no_log: true
+
+    - name: Require unambiguous organization lookup
+      ansible.builtin.assert:
+        that:
+          - lifecycle_aap_org.json.count in [0, 1]
+          - >-
+            lifecycle_aap_org.json.count == 0 or
+            lifecycle_aap_org.json.results[0].description is match('Demo-managed ')
+        fail_msg: Existing organization is not demonstrably demo-managed; no resources may be removed.
+
+    - name: Inspect each exact allowlisted object class
+      ansible.builtin.include_tasks: lifecycle/inspect-objects.yml
+      loop: "{{ demo_lifecycle_objects }}"
+      loop_control:
+        loop_var: lifecycle_object
+      when: lifecycle_aap_org.json.count == 1
+
+    - name: Inspect only demo namespaces and their content ownership
+      ansible.builtin.include_tasks: lifecycle/inspect-namespace.yml
+      loop: [ww-demo-portal, ww-demo-execution]
+      loop_control:
+        loop_var: lifecycle_namespace
+
+    - name: Inspect exact supported demo Helm release metadata
+      kubernetes.core.helm_info:
+        name: ww-demo-portal
+        release_namespace: ww-demo-portal
+        host: "{{ demo_portal_cluster_api }}"
+        api_key: "{{ demo_portal_cluster_token }}"
+        validate_certs: "{{ demo_portal_validate_certs }}"
+        ca_cert: "{{ demo_portal_ca_cert }}"
+      register: lifecycle_helm_release
+      no_log: true
+
+    - name: Require the pinned supported chart before any release removal
+      ansible.builtin.assert:
+        that:
+          - >-
+            lifecycle_helm_release.status is not defined or
+            (lifecycle_helm_release.status.name == 'ww-demo-portal' and
+             lifecycle_helm_release.status.namespace == 'ww-demo-portal' and
+             lifecycle_helm_release.status.chart == 'redhat-rhaap-portal-2.2.11')
+        fail_msg: The named release is not the verified demo chart; refuse lifecycle cleanup.
+
+    - name: Inspect each explicitly removable execution-image object
+      kubernetes.core.k8s_info:
+        api_version: "{{ item.api }}"
+        kind: "{{ item.kind }}"
+        namespace: ww-demo-execution
+        name: "{{ item.name }}"
+      loop:
+        - {api: build.openshift.io/v1, kind: BuildConfig, name: ww-demo-ee}
+        - {api: image.openshift.io/v1, kind: ImageStream, name: ww-demo-ee}
+        - {api: rbac.authorization.k8s.io/v1, kind: RoleBinding, name: ww-demo-aap-image-pull}
+      register: lifecycle_execution_objects
+
+    - name: Require project labels on every explicitly removable image object
+      ansible.builtin.assert:
+        that:
+          - item.metadata.labels.get('app.kubernetes.io/managed-by', '') == 'aap-tfe-failover-demo'
+        fail_msg: Execution object {{ item.metadata.name }} is not demo-owned; nothing may be removed.
+      loop: "{{ lifecycle_execution_objects.results | map(attribute='resources') | flatten }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Remove verified AAP content in dependency order through dispatch
+      ansible.builtin.include_tasks: lifecycle/remove-objects.yml
+      loop: "{{ demo_lifecycle_objects }}"
+      loop_control:
+        loop_var: lifecycle_object
+      when:
+        - demo_lifecycle_remove | bool
+        - lifecycle_aap_org.json.count == 1
+
+    - name: Uninstall only the verified demo Helm release
+      kubernetes.core.helm:
+        name: ww-demo-portal
+        release_namespace: ww-demo-portal
+        host: "{{ demo_portal_cluster_api }}"
+        api_key: "{{ demo_portal_cluster_token }}"
+        validate_certs: "{{ demo_portal_validate_certs }}"
+        ca_cert: "{{ demo_portal_ca_cert }}"
+        state: absent
+        wait: true
+      when: demo_lifecycle_remove | bool
+
+    - name: Remove only explicit project-managed execution image objects
+      kubernetes.core.k8s:
+        api_version: "{{ item.api }}"
+        kind: "{{ item.kind }}"
+        namespace: ww-demo-execution
+        name: "{{ item.name }}"
+        state: absent
+      loop:
+        - {api: build.openshift.io/v1, kind: BuildConfig, name: ww-demo-ee}
+        - {api: image.openshift.io/v1, kind: ImageStream, name: ww-demo-ee}
+        - {api: rbac.authorization.k8s.io/v1, kind: RoleBinding, name: ww-demo-aap-image-pull}
+      when: demo_lifecycle_remove | bool
+
+    - name: Explain conservative global-resource retention
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Removed' if demo_lifecycle_remove | bool else 'Verified' }} only allowlisted demo content.
+          Existing organizations, users, teams and global credential types are retained, never deleted by name.
+          Empty namespace shells, Portal PVCs, OAuth and credential Secrets are retained for safe reuse;
+          unrelated resources are never removed by namespace deletion.

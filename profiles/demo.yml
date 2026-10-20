@@ -1,0 +1,9 @@
+---
+# Resource names remain fixed to the deployed v0.1 topology.
+demo:
+  prefix: ww-demo
+terraform:
+  project: datacentre-failover
+  retain_history: true
+portal:
+  enabled: true

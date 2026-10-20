@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$LIFECYCLE_FIXTURE_CALLS"
+if [[ "$*" == *"-lock=false"* || "$*" == *"force-unlock"* ]]; then
+    echo "Unsafe Terraform invocation" >&2
+    exit 9
+fi
+for argument in "$@"; do
+    case "$argument" in
+        validate) exit 0 ;;
+        show) printf '%s\n' "$LIFECYCLE_FIXTURE_PLAN"; exit 0 ;;
+        apply) exit 0 ;;
+        plan) exit "${LIFECYCLE_FIXTURE_RC:-2}" ;;
+    esac
+done
+echo "Unexpected Terraform invocation" >&2
+exit 8

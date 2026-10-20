@@ -1,0 +1,68 @@
+---
+- name: Load the non-secret lifecycle profile
+  ansible.builtin.include_vars:
+    file: "{{ lifecycle_profile_path }}"
+    name: lifecycle_profile
+
+- name: Validate the supported fixed topology and explicit identity
+  ansible.builtin.assert:
+    that:
+      - lifecycle_profile.keys() | sort == ['demo', 'portal', 'terraform']
+      - "lifecycle_profile.demo == {'prefix': 'ww-demo'}"
+      - "lifecycle_profile.portal == {'enabled': true}"
+      - lifecycle_profile.terraform.keys() | sort == ['project', 'retain_history']
+      - lifecycle_profile.terraform.project is match('^[A-Za-z0-9_-]+$')
+      - lifecycle_profile.terraform.retain_history is boolean
+      - lifecycle_account is match('^[0-9]{12}$')
+      - lifecycle_region is match('^[a-z]{2}(-[a-z]+)+-[0-9]+$')
+      - lifecycle_org is match('^[A-Za-z0-9_-]+$')
+      - lookup('ansible.builtin.env', 'TFE_ADDRESS') in ['', 'https://app.terraform.io']
+      - lookup('ansible.builtin.env', 'TF_VAR_terraform_organization') in ['', lifecycle_org]
+      - lookup('ansible.builtin.env', 'TF_VAR_project_prefix') in ['', 'ww-demo']
+      - lookup('ansible.builtin.env', 'TF_VAR_aws_region') == lifecycle_region
+    fail_msg: >-
+      Unsupported profile or missing/mismatched identity. Phase 6 supports only the existing ww-demo
+      topology and HCP Free; set TF_VAR_aws_account_id, TF_VAR_aws_region and HCP_TERRAFORM_ORGANIZATION.
+
+- name: Require installed external lifecycle tooling
+  ansible.builtin.command:
+    argv: "{{ item }}"
+  loop:
+    - [terraform, version, -json]
+    - [docker, info, --format, "{{ '{{.ServerVersion}}' }}"]
+    - [ssh, -V]
+    - [git, --version]
+    - [jq, --version]
+  changed_when: false
+
+- name: Verify AWS authentication without printing credentials
+  block:
+    - name: Verify actual AWS identity without printing credentials
+      amazon.aws.aws_caller_info:
+        region: "{{ lifecycle_region }}"
+      register: lifecycle_aws_identity
+      no_log: true
+  rescue:
+    - name: Explain AWS preflight failure
+      ansible.builtin.fail:
+        msg: >-
+          Cannot verify AWS identity. Check credentials/session expiry, STS connectivity and the
+          isolated Python interpreter's boto3 installation. No infrastructure was changed.
+
+- name: Require the explicitly pinned AWS account
+  ansible.builtin.assert:
+    that:
+      - lifecycle_aws_identity.account == lifecycle_account
+    fail_msg: AWS credentials do not belong to the explicitly pinned demo account. No infrastructure changes are safe.
+
+- name: Verify the existing AAP 2.7 gateway
+  ansible.builtin.command:
+    argv: [bash, scripts/aap-configure.sh, check]
+    chdir: "{{ lifecycle_root }}"
+  changed_when: false
+
+- name: Allocate private lifecycle state directory
+  ansible.builtin.file:
+    path: "{{ lifecycle_root }}/.local/lifecycle"
+    state: directory
+    mode: "0700"

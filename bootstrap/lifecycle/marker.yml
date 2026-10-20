@@ -1,0 +1,67 @@
+---
+- name: Resolve the actual front door and private key path
+  ansible.builtin.set_fact:
+    lifecycle_frontdoor_ip: "{{ (lifecycle_shared_outputs.stdout | from_json).frontdoor_public_ip.value }}"
+    lifecycle_private_key: "{{ lifecycle_key if lifecycle_key is match('^/') else lifecycle_root ~ '/' ~ lifecycle_key }}"
+
+- name: Inspect the exact operation marker over trusted SSH
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - "UserKnownHostsFile={{ lifecycle_known_hosts }}"
+      - -o
+      - ConnectTimeout=15
+      - -i
+      - "{{ lifecycle_private_key }}"
+      - "ec2-user@{{ lifecycle_frontdoor_ip }}"
+      - sudo test ! -e /run/ww-demo-failover.lock
+  changed_when: false
+
+- name: Atomically reserve the standard operation marker before approved destruction
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - "UserKnownHostsFile={{ lifecycle_known_hosts }}"
+      - -o
+      - ConnectTimeout=15
+      - -i
+      - "{{ lifecycle_private_key }}"
+      - "ec2-user@{{ lifecycle_frontdoor_ip }}"
+      - sudo mkdir /run/ww-demo-failover.lock
+  changed_when: true
+  when:
+    - lifecycle_operation == 'teardown'
+    - lifecycle_approved | bool
+
+- name: Persist explicit teardown ownership for administrator inspection on interruption
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - BatchMode=yes
+      - -o
+      - StrictHostKeyChecking=yes
+      - -o
+      - "UserKnownHostsFile={{ lifecycle_known_hosts }}"
+      - -i
+      - "{{ lifecycle_private_key }}"
+      - "ec2-user@{{ lifecycle_frontdoor_ip }}"
+      - sudo tee /run/ww-demo-failover.lock/request.json
+    stdin: >-
+      {{ {'operation': 'teardown', 'owner_id': 'phase6-administrator', 'aws_account_id': lifecycle_account,
+          'aws_region': lifecycle_region, 'workspace_ids': lifecycle_workspace_ids,
+          'traffic_mutation_started': false, 'outcome': 'in_progress'} | to_json }}
+  changed_when: true
+  when:
+    - lifecycle_operation == 'teardown'
+    - lifecycle_approved | bool

@@ -1,0 +1,18 @@
+---
+lifecycle_root: "{{ playbook_dir | dirname }}"
+lifecycle_hcp: https://app.terraform.io/api/v2
+lifecycle_org: "{{ lookup('ansible.builtin.env', 'HCP_TERRAFORM_ORGANIZATION') }}"
+lifecycle_token: "{{ lookup('ansible.builtin.env', 'TF_TOKEN_app_terraform_io') }}"
+lifecycle_account: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_account_id') }}"
+lifecycle_region: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_region') }}"
+lifecycle_sites: [shared, dc1, dc2]
+lifecycle_workspace_ids: {}
+lifecycle_environment:
+  TF_VAR_terraform_organization: "{{ lifecycle_org }}"
+  TF_VAR_project_prefix: ww-demo
+  AWS_REGION: "{{ lifecycle_region }}"
+  AWS_DEFAULT_REGION: "{{ lifecycle_region }}"
+lifecycle_key: >-
+  {{ lookup('ansible.builtin.env', 'SSH_PRIVATE_KEY_PATH') | default('.local/ssh/ww-demo', true) }}
+lifecycle_known_hosts: >-
+  {{ lookup('ansible.builtin.env', 'SSH_KNOWN_HOSTS_PATH') | default(lookup('ansible.builtin.env', 'HOME') ~ '/.ssh/known_hosts', true) }}

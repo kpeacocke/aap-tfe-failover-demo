@@ -1,0 +1,31 @@
+---
+demo_lifecycle_remove: false
+demo_lifecycle_org_name: Demo | Datacentre Failover
+demo_lifecycle_stage_names: >-
+  {{ (lookup('ansible.builtin.file', playbook_dir ~ '/aap-demo-vars.yml') | from_yaml).demo_workflow_stages
+      | map(attribute='name') | map('regex_replace', '^', 'Demo | ') | list }}
+demo_lifecycle_objects:
+  - endpoint: workflow_job_templates
+    names: [Demo - Datacentre Failover, Demo - Datacentre Recovery]
+    role: controller_workflow_job_templates
+    variable: controller_workflows
+  - endpoint: job_templates
+    names: "{{ demo_lifecycle_stage_names + ['Demo | Setup', 'Demo | EE Readiness', 'Demo | Portal Failover', 'Demo | Portal Recovery'] }}"
+    role: controller_job_templates
+    variable: controller_templates
+  - endpoint: inventories
+    names: [Demo | Runtime]
+    role: controller_inventories
+    variable: controller_inventories
+  - endpoint: projects
+    names: [Demo | Datacentre Failover]
+    role: controller_projects
+    variable: controller_projects
+  - endpoint: credentials
+    names: [Demo | Terraform API, Demo | HAProxy SSH, Demo | AWS Health Read, Demo | AAP Reconcile, Demo | Portal Workflow Runner]
+    role: controller_credentials
+    variable: controller_credentials
+  - endpoint: execution_environments
+    names: [Demo | Failover Execution Environment]
+    role: controller_execution_environments
+    variable: controller_execution_environments

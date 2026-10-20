@@ -1,0 +1,106 @@
+---
+- name: Bootstrap only the demo on the supplied RHDP platforms
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [lifecycle/vars.yml]
+  vars:
+    lifecycle_operation: bootstrap
+  tasks:
+    - name: Verify profile, tools and actual platform identities
+      ansible.builtin.include_tasks: lifecycle/preflight.yml
+
+    - name: Create or reuse the existing local demo SSH key helper
+      ansible.builtin.command:
+        argv: [bash, scripts/create-ssh-key.sh]
+        chdir: "{{ lifecycle_root }}"
+      register: lifecycle_ssh
+      changed_when: "'Created demo SSH key' in lifecycle_ssh.stdout"
+
+    - name: Inspect and initialize all three workspaces before provisioning
+      ansible.builtin.include_tasks: lifecycle/workspace.yml
+      loop: "{{ lifecycle_sites }}"
+      loop_control:
+        loop_var: lifecycle_site
+
+    - name: Inspect current operations and project ownership before infrastructure reconciliation
+      ansible.builtin.command:
+        argv: [bash, scripts/aap-configure.sh, lifecycle-inspect]
+        chdir: "{{ lifecycle_root }}"
+      changed_when: false
+
+    - name: Read existing shared outputs before changing infrastructure
+      ansible.builtin.command:
+        argv: [bash, scripts/terraform.sh, shared, output, -json]
+        chdir: "{{ lifecycle_root }}"
+      register: lifecycle_shared_outputs
+      changed_when: false
+      no_log: true
+
+    - name: Refuse any retained operational marker before bootstrap reconciliation
+      ansible.builtin.include_tasks: lifecycle/marker.yml
+      when: "'frontdoor_public_ip' in lifecycle_shared_outputs.stdout | from_json"
+
+    - name: Reconcile the dedicated HCP project and minimal state consumers
+      ansible.builtin.include_tasks: lifecycle/hcp.yml
+
+    - name: Provision in dependency order through Terraform
+      ansible.builtin.include_tasks: lifecycle/terraform.yml
+      loop: "{{ lifecycle_sites }}"
+      loop_control:
+        loop_var: lifecycle_site
+
+    - name: Read the actual shared front door
+      ansible.builtin.command:
+        argv: [bash, scripts/terraform.sh, shared, output, -raw, frontdoor_public_ip]
+        chdir: "{{ lifecycle_root }}"
+      register: lifecycle_frontdoor
+      changed_when: false
+
+    - name: Require independently verified SSH host trust before configuring AAP
+      block:
+        - name: Verify the supplied SSH trust before configuring AAP
+          ansible.builtin.command:
+            argv: [ssh-keygen, -F, "{{ lifecycle_frontdoor.stdout }}", -f, "{{ lifecycle_known_hosts }}"]
+          changed_when: false
+      rescue:
+        - name: Explain the required fresh-host trust step
+          ansible.builtin.fail:
+            msg: >-
+              Infrastructure is provisioned, but {{ lifecycle_frontdoor.stdout }} has no trusted SSH entry in
+              {{ lifecycle_known_hosts }}. Verify its SSH host fingerprint using a trusted EC2 console/source,
+              add the verified host key, then rerun bootstrap. Blind ssh-keyscan acceptance is never used.
+
+    - name: Reconcile the existing demo execution image on RHDP OpenShift
+      ansible.builtin.command:
+        argv: [bash, scripts/aap-configure.sh, build-ee]
+        chdir: "{{ lifecycle_root }}"
+      changed_when: false
+
+    - name: Read the verified execution image and reconcile demo AAP and Portal
+      ansible.builtin.command:
+        argv: [bash, scripts/aap-configure.sh, lifecycle-bootstrap]
+        chdir: "{{ lifecycle_root }}"
+      environment:
+        DEMO_LIFECYCLE_FRONTDOOR: "{{ lifecycle_frontdoor.stdout }}"
+      register: lifecycle_platform_result
+      changed_when: false
+
+    - name: Verify public application readiness without changing traffic
+      ansible.builtin.uri:
+        url: "http://{{ lifecycle_frontdoor.stdout }}/health"
+        timeout: 10
+      register: lifecycle_application
+      until: >-
+        lifecycle_application.status == 200 and
+        lifecycle_application.json.status | default('') == 'healthy' and
+        lifecycle_application.json.datacentre | default('') in ['dc1', 'dc2']
+      retries: 30
+      delay: 5
+
+    - name: Report bootstrap completion without credentials
+      ansible.builtin.debug:
+        msg:
+          application_url: "http://{{ lifecycle_frontdoor.stdout }}"
+          active_dc: "{{ lifecycle_application.json.datacentre }}"
+          portal_urls: "{{ lifecycle_platform_result.stdout | regex_findall('https://ww-demo-portal\\.[A-Za-z0-9.-]*[A-Za-z0-9]') | unique }}"

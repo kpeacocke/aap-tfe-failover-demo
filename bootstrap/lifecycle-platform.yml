@@ -1,0 +1,35 @@
+---
+- name: Read the existing demo image rather than requiring a copied digest
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [portal/vars.yml]
+  tasks:
+    - name: Read the demo-owned image stream
+      kubernetes.core.k8s_info:
+        host: "{{ demo_portal_cluster_api }}"
+        api_key: "{{ demo_portal_cluster_token }}"
+        validate_certs: "{{ demo_portal_validate_certs }}"
+        ca_cert: "{{ demo_portal_ca_cert }}"
+        api_version: image.openshift.io/v1
+        kind: ImageStreamTag
+        namespace: ww-demo-execution
+        name: ww-demo-ee:phase4
+      register: lifecycle_platform_image
+
+    - name: Require exactly one immutable published image
+      ansible.builtin.assert:
+        that:
+          - lifecycle_platform_image.resources | length == 1
+          - lifecycle_platform_image.resources[0].image.metadata.name is match('^sha256:[a-f0-9]{64}$')
+
+    - name: Supply the discovered image to existing AAP bootstrap
+      ansible.builtin.set_fact:
+        demo_aap_ee_image: >-
+          image-registry.openshift-image-registry.svc:5000/ww-demo-execution/ww-demo-ee@{{ lifecycle_platform_image.resources[0].image.metadata.name }}
+
+- name: Reuse the common bootstrap and separate workflow reconciliation
+  ansible.builtin.import_playbook: install-demo.yml
+
+- name: Deploy or reconcile Portal on existing OpenShift
+  ansible.builtin.import_playbook: portal/deploy.yml

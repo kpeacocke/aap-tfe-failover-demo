@@ -1,0 +1,136 @@
+---
+- name: Execute actual production workspace and marker guards using safe fixtures
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    lifecycle_site: dc1
+    lifecycle_org: fixture-org
+    lifecycle_operation: teardown
+    lifecycle_approved: false
+    lifecycle_workspace:
+      status: 200
+      json:
+        data:
+          id: ws-fixture
+          type: workspaces
+          attributes: {name: ww-demo-dc1, execution-mode: local, locked: false}
+          relationships:
+            organization:
+              data: {id: fixture-org}
+  tasks:
+    - name: Allocate the exact production guard fixture
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -lifecycle-guard.yml
+      register: lifecycle_test_guard
+
+    - name: Run positive and negative production guards
+      block:
+        - name: Select the actual workspace-identity assertion
+          ansible.builtin.copy:
+            dest: "{{ lifecycle_test_guard.path }}"
+            content: >-
+              {{ lookup('ansible.builtin.file', '../../bootstrap/lifecycle/workspace.yml') | from_yaml
+                 | selectattr('name', 'equalto', 'Require an existing locally executed unlocked workspace or explicitly approved creation')
+                 | list | to_nice_yaml }}
+            mode: "0600"
+
+        - name: Require valid existing locally executed unlocked workspace acceptance
+          ansible.builtin.include_tasks: "{{ lifecycle_test_guard.path }}"
+
+        - name: Reject locked workspaces without any unlock or mutation
+          block:
+            - name: Model incident quarantine
+              ansible.builtin.set_fact:
+                lifecycle_workspace: "{{ lifecycle_workspace | combine({'json': {'data': {'attributes': {'locked': true}}}}, recursive=true) }}"
+            - name: Execute actual workspace guard
+              ansible.builtin.include_tasks: "{{ lifecycle_test_guard.path }}"
+            - name: Fail if quarantine was accepted
+              ansible.builtin.fail:
+                msg: TEST FAILURE - quarantine was accepted.
+          rescue:
+            - name: Require the production assertion to reject quarantine
+              ansible.builtin.assert:
+                that:
+                  - ansible_failed_task.name == 'Require an existing locally executed unlocked workspace or explicitly approved creation'
+
+        - name: Model a missing workspace during teardown
+          ansible.builtin.set_fact:
+            lifecycle_workspace: {status: 404}
+
+        - name: Reject missing workspace teardown rather than creating replacements
+          block:
+            - name: Execute missing-workspace guard
+              ansible.builtin.include_tasks: "{{ lifecycle_test_guard.path }}"
+            - name: Fail if a missing workspace was accepted
+              ansible.builtin.fail:
+                msg: TEST FAILURE - teardown accepted missing workspace.
+          rescue:
+            - name: Require the actual missing-workspace rejection
+              ansible.builtin.assert:
+                that:
+                  - ansible_failed_task.name == 'Require an existing locally executed unlocked workspace or explicitly approved creation'
+
+        - name: Model an approved bootstrap
+          ansible.builtin.set_fact:
+            lifecycle_operation: bootstrap
+            lifecycle_approved: true
+
+        - name: Require explicitly approved missing-workspace bootstrap acceptance
+          ansible.builtin.include_tasks: "{{ lifecycle_test_guard.path }}"
+
+        - name: Select only the production marker mutation tasks without executing them
+          ansible.builtin.set_fact:
+            lifecycle_test_marker: "{{ lookup('ansible.builtin.file', '../../bootstrap/lifecycle/marker.yml') | from_yaml }}"
+            lifecycle_test_teardown: "{{ lookup('ansible.builtin.file', '../../bootstrap/teardown.yml') | from_yaml }}"
+
+        - name: Require both operation and explicit approval for marker mutation
+          ansible.builtin.assert:
+            that:
+              - lifecycle_test_marker[2].when == ["lifecycle_operation == 'teardown'", "lifecycle_approved | bool"]
+              - lifecycle_test_marker[3].when == ["lifecycle_operation == 'teardown'", "lifecycle_approved | bool"]
+              - lifecycle_test_marker[1]['ansible.builtin.command'].argv[-1] == 'sudo test ! -e /run/ww-demo-failover.lock'
+              - >-
+                (lifecycle_test_teardown[0].tasks | selectattr('block', 'defined') | first).when == 'lifecycle_approved | bool'
+
+        - name: Model successful child output with a sentence-ending full stop
+          ansible.builtin.set_fact:
+            lifecycle_frontdoor: {stdout: 192.0.2.10}
+            lifecycle_application: {json: {datacentre: dc1}}
+            lifecycle_platform_result:
+              stdout: "Portal https://ww-demo-portal.example.test\nOpen https://ww-demo-portal.example.test."
+
+        - name: Select the production reporting task with a test-only result registration
+          ansible.builtin.tempfile:
+            state: file
+            suffix: -lifecycle-report.yml
+          register: lifecycle_test_report_file
+
+        - name: Write the reporting task to its own uncached fixture path
+          ansible.builtin.copy:
+            dest: "{{ lifecycle_test_report_file.path }}"
+            content: >-
+              {{ (lookup('ansible.builtin.file', '../../bootstrap/bootstrap.yml') | from_yaml)[0].tasks
+                 | selectattr('name', 'equalto', 'Report bootstrap completion without credentials')
+                 | map('combine', {'register': 'lifecycle_test_report'}) | list | to_nice_yaml }}
+            mode: "0600"
+
+        - name: Execute actual public URL reporting
+          ansible.builtin.include_tasks: "{{ lifecycle_test_report_file.path }}"
+
+        - name: Require exactly one valid Portal URL without punctuation
+          ansible.builtin.assert:
+            that:
+              - "lifecycle_test_report.msg.portal_urls == ['https://ww-demo-portal.example.test']"
+      always:
+        - name: Remove only the allocated guard fixture
+          ansible.builtin.file:
+            path: "{{ lifecycle_test_guard.path }}"
+            state: absent
+
+        - name: Remove only the allocated reporting fixture
+          ansible.builtin.file:
+            path: "{{ lifecycle_test_report_file.path }}"
+            state: absent
+          when: lifecycle_test_report_file.path is defined

@@ -1,0 +1,95 @@
+---
+- name: Preflight or explicitly destroy only this demo
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files: [lifecycle/vars.yml]
+  vars:
+    lifecycle_operation: teardown
+  tasks:
+    - name: Verify profile, tools and pinned identities
+      ansible.builtin.include_tasks: lifecycle/preflight.yml
+
+    - name: Require all existing workspaces unlocked before any destructive action
+      ansible.builtin.include_tasks: lifecycle/workspace.yml
+      loop: "{{ lifecycle_sites }}"
+      loop_control:
+        loop_var: lifecycle_site
+
+    - name: Inspect platform jobs and exact demo content ownership without changing resources
+      ansible.builtin.command:
+        argv: [bash, scripts/aap-configure.sh, lifecycle-inspect]
+        chdir: "{{ lifecycle_root }}"
+      changed_when: false
+
+    - name: Read current shared infrastructure outputs without downloading state
+      ansible.builtin.command:
+        argv: [bash, scripts/terraform.sh, shared, output, -json]
+        chdir: "{{ lifecycle_root }}"
+      register: lifecycle_shared_outputs
+      changed_when: false
+      no_log: true
+
+    - name: Require shared topology ownership before touching AWS
+      ansible.builtin.assert:
+        that:
+          - >-
+            lifecycle_shared_outputs.stdout | from_json | length == 0 or
+            ((lifecycle_shared_outputs.stdout | from_json).project_prefix.value == 'ww-demo' and
+             (lifecycle_shared_outputs.stdout | from_json).aws_region.value == lifecycle_region)
+        fail_msg: Shared Terraform outputs do not prove demo prefix/region ownership.
+
+    - name: Inspect HAProxy marker and acquire teardown guard only with explicit confirmation
+      ansible.builtin.include_tasks: lifecycle/marker.yml
+      when: "'frontdoor_public_ip' in lifecycle_shared_outputs.stdout | from_json"
+
+    - name: Validate all destroy plans and their ownership without applying them
+      ansible.builtin.include_tasks: lifecycle/terraform.yml
+      loop: [dc1, dc2, shared]
+      loop_control:
+        loop_var: lifecycle_site
+      when: not lifecycle_approved | bool
+
+    - name: Report read-only preflight completion after all ownership checks and plans pass
+      ansible.builtin.debug:
+        msg: >-
+          Preflight passed; no resources destroyed. Use --confirm-destroy to authorize DC1, DC2, shared
+          destruction and verified platform-content cleanup. Workspace history retention:
+          {{ lifecycle_profile.terraform.retain_history }}. Identities, namespaces and Portal storage are preserved.
+      when: not lifecycle_approved | bool
+
+    - name: Destroy only approved demo resources in dependency order
+      when: lifecycle_approved | bool
+      block:
+        - name: Destroy DC1 then DC2 then shared through saved normal-locking plans
+          ansible.builtin.include_tasks: lifecycle/terraform.yml
+          loop: [dc1, dc2, shared]
+          loop_control:
+            loop_var: lifecycle_site
+
+        - name: Recheck platform ownership and remove only verified content
+          ansible.builtin.command:
+            argv: [bash, scripts/aap-configure.sh, lifecycle-remove]
+            chdir: "{{ lifecycle_root }}"
+          changed_when: true
+
+        - name: Safely delete empty workspaces only when history retention is explicitly disabled
+          ansible.builtin.uri:
+            url: "{{ lifecycle_hcp }}/workspaces/{{ lifecycle_workspace_ids[item] }}/actions/safe-delete"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ lifecycle_token }}"
+            status_code: [204]
+            follow_redirects: none
+            unredirected_headers: [Authorization]
+            timeout: 30
+          loop: [dc1, dc2, shared]
+          no_log: true
+          when: not lifecycle_profile.terraform.retain_history
+
+        - name: Report completed teardown and retained reusable resources
+          ansible.builtin.debug:
+            msg: >-
+              Terraform destruction and bounded platform cleanup completed.
+              RHDP AAP/OpenShift were not removed or upgraded. Local SSH keys/operator password,
+              AAP identity shells, Portal storage and credential Secrets are retained for reuse.

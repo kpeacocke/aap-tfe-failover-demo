@@ -1163,9 +1163,10 @@ The project assumes AAP 2.7 and OpenShift are already installed by RHDP. Do not 
 
 The repository must be portable.
 
-A bootstrap machine only needs:
+A bootstrap machine needs:
 
-- Python 3;
+- Python 3.12-3.14 (set `BOOTSTRAP_PYTHON` if it is not the default);
+- Terraform 1.9.x, Docker with a working daemon, Git, curl, jq and OpenSSH tools;
 - network access to AAP;
 - network access to HCP Terraform;
 - network access to Git;
@@ -1185,6 +1186,14 @@ The shell script should only:
 4. launch the Ansible bootstrap playbook.
 
 Do not implement platform configuration in Bash.
+
+Phase 6 reuses the existing pinned Docker execution image and Terraform CLI
+wrappers rather than inventing replacements for certified Red Hat modules.
+Consequently Python alone is not sufficient on the external bootstrap machine.
+The thin lifecycle shell wrapper creates an isolated `.local/lifecycle-venv`,
+installs the pinned requirements/collections (retrying incomplete setup), loads
+the private `.env`, and launches Ansible orchestration. Platform reconciliation
+and lifecycle decisions stay in Ansible.
 
 ---
 
@@ -1235,38 +1244,20 @@ Example:
 ```yaml
 demo:
   prefix: ww-demo
-
-aap:
-  url: https://aap.example.com
-  organisation: Datacentre Failover Demo
-  project: Datacentre Failover Demo
-  execution_environment: Default execution environment
-
 terraform:
-  url: https://app.terraform.io
-  organisation: example
   project: datacentre-failover
-
-aws:
-  region: "<verified RHDP lab AWS region>"
-
-openshift:
-  api_url: https://api.example.openshiftapps.com:6443
-  namespace: ww-demo-portal
-
+  retain_history: true
 portal:
   enabled: true
-  deploy_if_missing: true
-
-application:
-  name: Customer Orders Demo
-  version: 1.0.0
-
-failover:
-  drain_timeout_seconds: 60
-  health_retries: 10
-  health_delay_seconds: 3
 ```
+
+This is the implemented `profiles/demo.yml` schema. v0.1 deliberately supports
+only the existing `ww-demo` topology, fixed AAP/Portal names, HCP Terraform Free,
+and enabled Portal. Unknown profile keys/configurations are rejected rather
+than accepted and ignored. Endpoints, organization, explicit AWS account/region,
+runtime parameters and credentials continue to come from the existing `.env`.
+Application/workflow customization and arbitrary prefixes are not introduced
+as unsupported partial configuration options.
 
 Secrets must come from environment variables or secure credential mechanisms.
 
@@ -1457,6 +1448,34 @@ Teardown should:
 Never delete arbitrary existing organisations, users or credentials.
 
 All managed objects must use a unique project prefix or tag.
+
+The default command is a **non-destructive preflight**, including three
+normal-locking saved destroy plans and ownership checks. Actual destruction
+requires `--confirm-destroy`. It refuses locked/missing/remote-execution
+workspaces, any active AAP job, retained HAProxy operation markers, ambiguous
+or non-demo platform objects, and Terraform resources outside the implemented
+addresses and demo tags. It never force-unlocks, automatically releases
+quarantine, cancels jobs, or deletes a namespace.
+
+With explicit confirmation, teardown atomically reserves the standard HAProxy
+operation marker, records teardown ownership, destroys DC1/DC2/shared using
+the exact saved plans, and removes only verified demo AAP content through
+`infra.aap_configuration.dispatch`. The exact supported demo Helm release is
+uninstalled and individually labelled execution-image objects are removed.
+No pre-existing RHDP platform is removed or upgraded.
+
+Safe retention is intentional: organization/user/team shells, the global
+credential type, Portal OAuth/identity Secrets, Portal PVCs, namespace shells,
+local SSH keys/operator password and HCP project remain for reuse. Deleting
+identity Secrets while retaining AAP identities would make their one-time
+credentials unrecoverable, so they are kept together. Workspace history is
+retained by default; `terraform.retain_history: false` selects only HCP's
+documented **safe-delete** action after successful infrastructure destruction.
+No unconditional workspace DELETE is used. If a confirmed destroy is
+interrupted, its marker remains for administrator inspection; it is never
+silently stolen or cleared. Resume requires reviewing actual state and
+explicitly resolving that stale marker first. Operators must not run outside
+administrative mutations concurrently with lifecycle actions.
 
 ---
 
@@ -2029,6 +2048,54 @@ Phase 5 live acceptance is complete on the supplied RHDP lab:
 ## Phase 6
 
 Bootstrap and teardown.
+
+Implementation:
+
+- `scripts/bootstrap.sh profiles/demo.yml [--apply]`: no-change reconciliation
+  without the flag; `--apply` explicitly permits missing-workspace/project
+  creation and inspected Terraform provisioning changes. Reuses existing local
+  execution workspaces, creates/reuses the named HCP project, grants only the
+  two DC consumers shared-state access, provisions shared/DC1/DC2 in order,
+  discovers the front door and image digest, and runs the existing common AAP
+  bootstrap, separate workflow setup, and supported Portal deploy/verify.
+- Local execution inherits the standard AWS credential chain, including
+  temporary credentials. Secrets are not uploaded into workspace variables.
+  The explicit account pin is mandatory for lifecycle commands.
+- Fresh/recreated HAProxy hosts require an independently verified known_hosts
+  entry. Bootstrap stops clearly after provisioning if trust is missing and
+  resumes safely after the presenter verifies it; it does not blindly trust
+  scanned keys. The existing AAP execution-egress CIDR must also be verified
+  and supplied as documented in Phase 4.
+- `scripts/teardown.sh profiles/demo.yml`: live read-only preflight, never a
+  destroy. `--confirm-destroy` is a separate explicit destructive authorization,
+  not implied by implementing Phase 6.
+- Saved plans are private temporary files, applied only after approval and
+  exact resource-address/tag verification, then removed on success/failure.
+- Executable tests replay production saved-plan tasks with a fake Terraform
+  executable and execute real workspace/platform guards against fixtures.
+  Existing CI runs these focused tests and lint; no Phase 7 expansion is added.
+
+The presenter selected **live bootstrap reconciliation and teardown preflight
+only**, retaining history and leaving the demo running. Real destructive
+teardown/recreation is intentionally not executed or claimed verified.
+
+Phase 6 non-destructive validation passed on the supplied lab:
+
+- Initial approved bootstrap and two repeat no-apply reconciliations exited 0;
+  no AWS apply was needed. One dedicated HCP project and the two shared-state
+  consumers were reconciled; all three original workspace IDs were reused.
+- Final teardown preflight exited 0, inspecting all three real normal-locking
+  destroy plans and every ownership guard without applying a destroy.
+- All three reusable Portal credential Secret UIDs/resourceVersions remained
+  unchanged through repeats; three real restricted-browser tests passed.
+- Saved-plan approval/refusal, failure cleanup, exact address/tag ownership,
+  workspace quarantine/missing-state guards, platform ownership/pagination,
+  conservative retention and exact URL reporting regressions passed.
+- Production-profile Ansible lint, ShellCheck and existing AAP/Portal regression
+  suites passed. The existing CI is wired to these focused lifecycle tests.
+- Final state remains healthy DC1 through both active nodes, unlocked local
+  workspaces and no operation marker. Destructive apply/removal/safe-delete
+  acceptance remains explicitly unverified.
 
 ## Phase 7
 

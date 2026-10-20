@@ -1,0 +1,51 @@
+---
+- name: Inspect exact HCP workspace
+  ansible.builtin.uri:
+    url: "{{ lifecycle_hcp }}/organizations/{{ lifecycle_org }}/workspaces/ww-demo-{{ lifecycle_site }}"
+    headers:
+      Authorization: "Bearer {{ lifecycle_token }}"
+    status_code: [200, 404]
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  register: lifecycle_workspace
+  no_log: true
+
+- name: Require an existing locally executed unlocked workspace or explicitly approved creation
+  ansible.builtin.assert:
+    that:
+      - >-
+        lifecycle_workspace.status == 200 or
+        (lifecycle_operation == 'bootstrap' and lifecycle_approved | bool)
+      - >-
+        lifecycle_workspace.status == 404 or
+        (lifecycle_workspace.json.data.type == 'workspaces' and
+         lifecycle_workspace.json.data.attributes.name == 'ww-demo-' ~ lifecycle_site and
+         lifecycle_workspace.json.data.relationships.organization.data.id == lifecycle_org and
+         lifecycle_workspace.json.data.attributes['execution-mode'] == 'local' and
+         not lifecycle_workspace.json.data.attributes.locked)
+    fail_msg: >-
+      Workspace ww-demo-{{ lifecycle_site }} is missing, locked, remote-execution or has unexpected identity.
+      Use --apply to create absent workspaces; resolve quarantine through recovery, never force unlock.
+
+- name: Initialize the verified local backend using the existing helper
+  ansible.builtin.command:
+    argv: [bash, scripts/terraform.sh, "{{ lifecycle_site }}", init, -input=false, -no-color]
+    chdir: "{{ lifecycle_root }}"
+  environment: "{{ lifecycle_environment }}"
+  changed_when: lifecycle_workspace.status == 404
+
+- name: Re-read exact workspace after initialization
+  ansible.builtin.uri:
+    url: "{{ lifecycle_hcp }}/organizations/{{ lifecycle_org }}/workspaces/ww-demo-{{ lifecycle_site }}"
+    headers:
+      Authorization: "Bearer {{ lifecycle_token }}"
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  register: lifecycle_workspace_verified
+  no_log: true
+
+- name: Record exact workspace IDs
+  ansible.builtin.set_fact:
+    lifecycle_workspace_ids: "{{ lifecycle_workspace_ids | combine({lifecycle_site: lifecycle_workspace_verified.json.data.id}) }}"

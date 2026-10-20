@@ -1,0 +1,42 @@
+---
+- name: Inspect exact namespace ownership
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Namespace
+    name: "{{ lifecycle_namespace }}"
+  register: lifecycle_namespace_info
+
+- name: Require demo ownership before namespace cleanup
+  ansible.builtin.assert:
+    that:
+      - >-
+        lifecycle_namespace_info.resources | length == 0 or
+        lifecycle_namespace_info.resources[0].metadata.labels.get('app.kubernetes.io/managed-by', '') == 'aap-tfe-failover-demo'
+    fail_msg: Namespace {{ lifecycle_namespace }} is not project-owned.
+
+- name: Inspect workload ownership inside the demo namespace
+  kubernetes.core.k8s_info:
+    api_version: "{{ item.api }}"
+    kind: "{{ item.kind }}"
+    namespace: "{{ lifecycle_namespace }}"
+  loop:
+    - {api: apps/v1, kind: Deployment}
+    - {api: apps/v1, kind: StatefulSet}
+    - {api: apps/v1, kind: DaemonSet}
+    - {api: batch/v1, kind: CronJob}
+    - {api: build.openshift.io/v1, kind: BuildConfig}
+  register: lifecycle_namespace_workloads
+  when: lifecycle_namespace_info.resources | length == 1
+
+- name: Refuse any unrelated workload in a demo-owned namespace
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.metadata.labels.get('app.kubernetes.io/managed-by', '') == 'aap-tfe-failover-demo' or
+        (lifecycle_namespace == 'ww-demo-portal' and
+         item.metadata.labels.get('app.kubernetes.io/managed-by', '') == 'Helm' and
+         item.metadata.labels.get('app.kubernetes.io/instance', '') == 'ww-demo-portal')
+    fail_msg: Unrelated workload {{ item.metadata.name }} found; do not delete its namespace.
+  loop: "{{ lifecycle_namespace_workloads.results | default([]) | selectattr('resources', 'defined') | map(attribute='resources') | flatten }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
