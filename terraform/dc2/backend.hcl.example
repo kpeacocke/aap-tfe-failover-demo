@@ -1,0 +1,5 @@
+organization = "YOUR_HCP_TERRAFORM_ORGANIZATION"
+
+workspaces {
+  name = "ww-demo-dc2"
+}

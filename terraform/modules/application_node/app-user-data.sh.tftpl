@@ -1,0 +1,39 @@
+#!/bin/bash
+set -euo pipefail
+
+dnf install -y python3
+groupadd --system demoapp
+useradd --system --gid demoapp --home-dir /opt/ww-demo --create-home --shell /sbin/nologin demoapp
+
+cat > /opt/ww-demo/app.py <<'PYTHON_APP'
+${app_source}
+PYTHON_APP
+chown root:demoapp /opt/ww-demo/app.py
+chmod 0640 /opt/ww-demo/app.py
+
+cat > /etc/systemd/system/ww-demo-app.service <<'SYSTEMD_UNIT'
+[Unit]
+Description=Woolworths failover demo application
+After=network.target
+
+[Service]
+Type=simple
+User=demoapp
+Group=demoapp
+Environment=DEMO_DATACENTRE=${datacentre}
+Environment=DEMO_HOSTNAME=${hostname}
+Environment=DEMO_VERSION=${app_version}
+ExecStart=/usr/bin/python3 /opt/ww-demo/app.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+SYSTEMD_UNIT
+
+systemctl daemon-reload
+systemctl enable --now ww-demo-app.service

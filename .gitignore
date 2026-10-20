@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.terraform/
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+terraform/**/backend.hcl
+terraform/**/terraform.tfvars
+terraform/**/terraform.tfvars.json
+*.pem
+*.key
+.venv/
+__pycache__/
+*.py[cod]

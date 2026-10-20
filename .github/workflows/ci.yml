@@ -1,0 +1,34 @@
+name: Phase 1 validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Lint shell scripts
+        uses: ludeeus/action-shellcheck@2.0.0
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform
+      - name: Validate Terraform roots
+        run: |
+          for root in terraform/shared terraform/dc1 terraform/dc2; do
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+          done
+      - name: Test demo application
+        run: python -m unittest discover -s tests -v

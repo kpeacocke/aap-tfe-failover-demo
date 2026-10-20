@@ -8,7 +8,7 @@ The demo must prove four things:
 
 1. A low-privilege user can initiate a complex operational process through a simple self-service interface.
 2. Ansible Automation Platform executes the failover as a proper multi-stage workflow with validation, draining, switching, rollback/error handling and evidence.
-3. Terraform Enterprise or HCP Terraform provisions the target environment and remains the infrastructure source of truth.
+3. HCP Terraform provisions the target environment and remains the infrastructure source of truth.
 4. AAP feeds operational failure state back into Terraform by locking the failed site's workspace, preventing future Terraform activity against the failed site until recovery.
 
 This is a customer-facing demonstration.
@@ -18,6 +18,53 @@ It must be deterministic, understandable, repeatable and easy to reset.
 Do not build unnecessary production complexity.
 
 ---
+
+## Platform assumptions
+
+This project is designed primarily for the Red Hat Demo Platform (RHDP) Ansible Product Demos environment.
+
+Assume RHDP already provides and configures:
+
+- Red Hat Ansible Automation Platform **2.7**
+- an OpenShift cluster suitable for demo add-on workloads
+- AAP/OpenShift access and credentials from the RHDP catalog item
+- AWS access/credentials suitable for the demo environment
+
+Assume the presenter provides:
+
+- an HCP Terraform Free account and organisation
+
+The project must **not** install or upgrade AAP or the RHDP OpenShift cluster.
+
+The project **must deploy and configure Self-Service Automation Portal onto the existing RHDP OpenShift cluster when Portal is not already present**.
+
+The Portal deployment must:
+
+- use the supported AAP 2.7 OpenShift deployment mechanism;
+- be idempotent;
+- detect an existing Portal deployment and reconcile/reuse it where safe;
+- connect Portal to the existing AAP 2.7 instance;
+- avoid modifying unrelated OpenShift workloads;
+- create only demo-specific Portal resources/templates required by this project.
+
+The project bootstrap may create only demo-specific AAP content and configuration required for this demo, including:
+
+- organisation or organisation references;
+- project;
+- inventory and inventory sources;
+- credentials and credential references;
+- execution environment reference;
+- job templates;
+- workflow job templates;
+- RBAC/team/user mappings required by the demo;
+- Self-Service Automation Portal templates/catalog resources.
+
+Existing global AAP configuration must not be changed unless explicitly required by this document.
+
+Reuse an existing execution environment where practical. Create a dedicated demo execution environment only if required collections are unavailable.
+
+---
+
 
 # 2. Core architectural principle
 
@@ -76,8 +123,8 @@ The user must see only the allowed operational service and limited inputs.
 Implement exactly:
 
 - AWS
-- one AAP 2.6 environment
-- one Terraform Enterprise or HCP Terraform organisation
+- one AAP 2.7 environment
+- one HCP Terraform organisation
 - three Terraform workspaces
 - one shared HAProxy instance
 - two application nodes in DC1
@@ -252,7 +299,7 @@ collection.
 
 Do not require the Terraform CLI inside the AAP execution environment unless unavoidable.
 
-AAP 2.6 supports API integration with Terraform Enterprise and HCP Terraform through this collection.
+AAP 2.7 supports API integration with Terraform Enterprise and HCP Terraform through this collection.
 
 The runtime design must support both:
 
@@ -827,6 +874,274 @@ These must not be visible to the restricted portal user.
 
 ---
 
+# Self-Service Automation Portal deployment on RHDP OpenShift
+
+The RHDP Ansible Product Demos environment provides the base AAP and OpenShift environment. This repository treats Self-Service Automation Portal as an add-on workload deployed into that existing OpenShift cluster when required.
+
+Desired flow:
+
+```text
+RHDP catalog item
+    |
+    +--> AAP 2.7
+    |
+    +--> OpenShift
+           |
+           +--> Self-Service Automation Portal
+                    |
+                    +--> connected to existing AAP 2.7
+                    |
+                    +--> WW Demo failover/recovery templates
+```
+
+## Portal bootstrap behaviour
+
+Before deployment:
+
+1. verify the OpenShift API is reachable;
+2. verify the supplied OpenShift credential is valid;
+3. determine whether Self-Service Automation Portal is already installed;
+4. if installed and healthy, reuse/reconcile it;
+5. if absent, deploy it using the supported AAP 2.7 OpenShift installation path;
+6. wait for Portal workloads and Route to become healthy;
+7. configure Portal against the existing AAP 2.7 instance;
+8. publish the demo failover and recovery templates;
+9. verify a restricted test user can see only the permitted demo actions.
+
+Do not create a separate OpenShift cluster.
+
+Do not deploy a separate RHEL Portal appliance in the RHDP path.
+
+## Portal deployment resources
+
+Prefer a dedicated namespace/project for demo-owned Portal resources when supported, for example:
+
+```text
+ww-demo-portal
+```
+
+All created OpenShift objects must carry clear ownership labels or annotations where possible, for example:
+
+```text
+app.kubernetes.io/managed-by=aap-tfc-failover-demo
+demo.redhat.com/project=ww-demo-failover
+```
+
+Do not alter unrelated cluster-scoped objects unless the supported Red Hat Portal installer requires them.
+
+## Portal deployment automation
+
+Add:
+
+```text
+bootstrap/portal/
+```
+
+with:
+
+```text
+bootstrap/portal/check.yml
+bootstrap/portal/deploy.yml
+bootstrap/portal/configure.yml
+bootstrap/portal/verify.yml
+```
+
+Use the current supported AAP 2.7 OpenShift Portal installation method available in the RHDP environment.
+
+Before implementation, verify the exact installation mechanism and schema against current Red Hat documentation and the actual supplied RHDP cluster.
+
+Do not invent:
+
+- CRDs;
+- Helm values;
+- OAuth configuration fields;
+- Routes;
+- Secrets;
+- Operator APIs.
+
+## Portal/AAP connection
+
+Portal must connect to the existing AAP 2.7 instance.
+
+Reuse RHDP-provided AAP endpoint and credentials where possible.
+
+Do not expose AAP administrator credentials to Portal consumers.
+
+The restricted customer-facing Portal user must only see the approved demo services:
+
+- `Datacentre Failover`
+- `Recover Datacentre`
+
+## Portal verification
+
+Bootstrap must fail clearly if Portal cannot be made healthy.
+
+Minimum verification:
+
+- Portal workload healthy;
+- Portal Route reachable;
+- Portal-to-AAP connection healthy;
+- failover template visible;
+- recovery template visible;
+- restricted user cannot access arbitrary AAP functions through the Portal.
+
+---
+
+# AAP configuration-as-code pattern
+
+Follow the configuration-as-code pattern used by the Red Hat `ansible/product-demos` repository:
+
+`https://github.com/ansible/product-demos`
+
+Use the `infra.aap_configuration` collection and its `dispatch` role as the primary mechanism for creating and reconciling demo-specific AAP objects.
+
+The bootstrap pattern should be:
+
+```yaml
+- name: Install failover demo content
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    aap_hostname: '{{ lookup("env", "AAP_HOSTNAME") | default(omit, true) }}'
+    aap_username: '{{ lookup("env", "AAP_USERNAME") | default(omit, true) }}'
+    aap_password: '{{ lookup("env", "AAP_PASSWORD") | default(omit, true) }}'
+    aap_token: '{{ lookup("env", "AAP_TOKEN") | default("", true) }}'
+    aap_validate_certs: '{{ lookup("env", "AAP_VALIDATE_CERTS") | default(false, true) }}'
+
+  tasks:
+    - name: Validate AAP authentication inputs
+      ansible.builtin.assert:
+        that:
+          - aap_hostname is defined
+          - aap_token != "" or (aap_username is defined and aap_password is defined)
+
+    - name: Query AAP version
+      ansible.builtin.uri:
+        url: "{{ aap_hostname | regex_replace('/$', '') }}/api/gateway/v1/ping/"
+        method: GET
+        validate_certs: "{{ aap_validate_certs }}"
+        url_username: "{{ aap_username | default(omit) }}"
+        url_password: "{{ aap_password | default(omit) }}"
+        headers: "{{ {'Authorization': 'Bearer ' + aap_token} if aap_token else {} }}"
+      register: _gateway_ping
+
+    - name: Require AAP 2.7
+      ansible.builtin.assert:
+        that:
+          - _gateway_ping.json.version is version("2.7", "==")
+
+    - name: Load bootstrap variables
+      ansible.builtin.include_vars:
+        file: bootstrap/aap-bootstrap-vars.yml
+
+    - name: Reconcile AAP resources
+      ansible.builtin.include_role:
+        name: infra.aap_configuration.dispatch
+```
+
+Support APD-style authentication through:
+
+```text
+AAP_HOSTNAME
+AAP_TOKEN
+```
+
+or:
+
+```text
+AAP_HOSTNAME
+AAP_USERNAME
+AAP_PASSWORD
+```
+
+Optionally:
+
+```text
+AAP_VALIDATE_CERTS
+```
+
+Do not hardcode AAP credentials.
+
+Define AAP objects declaratively in variable files and let `infra.aap_configuration.dispatch` reconcile them.
+
+Use the established variable families where applicable:
+
+```yaml
+aap_organizations:
+aap_user_accounts:
+gateway_role_user_assignments:
+controller_execution_environments:
+controller_projects:
+controller_inventories:
+controller_inventory_sources:
+controller_credentials:
+controller_templates:
+controller_workflows:
+```
+
+Verify exact names and schemas against the installed `infra.aap_configuration` version before implementation. Do not invent fields.
+
+Mirror APD's two-stage model:
+
+1. create/reconcile common bootstrap resources;
+2. configure failover-demo-specific resources.
+
+Suggested files:
+
+```text
+bootstrap/install-demo.yml
+bootstrap/aap-bootstrap-vars.yml
+bootstrap/setup-demo.yml
+bootstrap/aap-demo-vars.yml
+```
+
+`install-demo.yml` establishes common resources needed to run the project.
+
+`setup-demo.yml` loads failover-specific variables and invokes:
+
+```yaml
+- name: Reconcile failover demo resources
+  ansible.builtin.include_role:
+    name: infra.aap_configuration.dispatch
+  vars:
+    controller_dependency_check: false
+```
+
+Only disable dependency checks when an actual ordering issue requires it.
+
+All created resources must use a unique demo prefix, for example:
+
+```text
+WW Demo |
+```
+
+or:
+
+```text
+ww-demo-
+```
+
+Use ownership labels/tags/descriptions where supported.
+
+The bootstrap must be idempotent. Re-running it must reconcile resources rather than create duplicates.
+
+For credentials that presenters may populate manually, prefer `update_secrets: false` where supported so reconciliation does not overwrite entered secrets.
+
+After the initial external bootstrap, create an in-platform setup/reconcile job template similar in concept to APD's `Single demo setup` job.
+
+Suggested name:
+
+```text
+WW Demo | Setup
+```
+
+That job should use this repository, the AAP 2.7-compatible demo execution environment, and `bootstrap/setup-demo.yml`.
+
+The project assumes AAP 2.7 and OpenShift are already installed by RHDP. Do not install or upgrade AAP or OpenShift. Deploy/configure Self-Service Automation Portal onto the existing RHDP OpenShift cluster when it is not already present.
+
+---
+
 # 24. Bootstrap
 
 The repository must be portable.
@@ -835,7 +1150,7 @@ A bootstrap machine only needs:
 
 - Python 3;
 - network access to AAP;
-- network access to TFE/HCP Terraform;
+- network access to HCP Terraform;
 - network access to Git;
 - required AWS/TFE/AAP credentials.
 
@@ -858,7 +1173,9 @@ Do not implement platform configuration in Bash.
 
 # 25. Bootstrap responsibilities
 
-The bootstrap must idempotently configure:
+The bootstrap must idempotently configure demo-specific content in the existing AAP 2.7 instance.
+
+It must not install or upgrade AAP or OpenShift. It may deploy/configure Self-Service Automation Portal on the existing OpenShift cluster.
 
 ## AAP
 
@@ -875,7 +1192,7 @@ The bootstrap must idempotently configure:
 - restricted demo user/team configuration;
 - portal-related resources where API/configuration allows.
 
-## Terraform Enterprise/HCP Terraform
+## HCP Terraform
 
 - identify organisation;
 - create or identify project;
@@ -916,8 +1233,13 @@ terraform:
 aws:
   region: ap-southeast-2
 
+openshift:
+  api_url: https://api.example.openshiftapps.com:6443
+  namespace: ww-demo-portal
+
 portal:
   enabled: true
+  deploy_if_missing: true
 
 application:
   name: Customer Orders Demo
@@ -937,6 +1259,8 @@ Expected environment variables may include:
 
 ```text
 AAP_TOKEN
+OPENSHIFT_API_URL
+OPENSHIFT_TOKEN
 TFE_TOKEN
 AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY
@@ -960,12 +1284,19 @@ Create:
 ├── ansible.cfg
 │
 ├── bootstrap/
-│   ├── bootstrap.yml
+│   ├── install-demo.yml
+│   ├── setup-demo.yml
 │   ├── teardown.yml
+│   ├── aap-bootstrap-vars.yml
+│   ├── aap-demo-vars.yml
 │   ├── requirements.yml
+│   ├── portal/
+│   │   ├── check.yml
+│   │   ├── deploy.yml
+│   │   ├── configure.yml
+│   │   └── verify.yml
 │   └── roles/
 │       ├── validate/
-│       ├── aap/
 │       ├── terraform/
 │       └── portal/
 │
@@ -1391,13 +1722,17 @@ AAP objects:
 
 ## Phase 5
 
-Portal:
+Portal on RHDP OpenShift:
 
-- restricted custom failover template;
-- recovery template;
-- RBAC.
+- detect any existing Self-Service Automation Portal deployment;
+- deploy Portal to the supplied RHDP OpenShift cluster if missing;
+- configure Portal against the existing AAP 2.7 instance;
+- create restricted custom failover template;
+- create recovery template;
+- configure RBAC;
+- verify restricted-user visibility and execution.
 
-Current AAP 2.6 portal custom templates are Git-backed YAML definitions that can launch AAP automation through `rhaap:*` actions. Use the current injected AAP token secret mechanism rather than asking the user to provide a token.
+Current AAP 2.7 portal custom templates are Git-backed YAML definitions that can launch AAP automation through `rhaap:*` actions. Use the current injected AAP token secret mechanism rather than asking the user to provide a token.
 
 ## Phase 6
 

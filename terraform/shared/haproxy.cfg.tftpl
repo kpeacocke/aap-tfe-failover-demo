@@ -1,0 +1,31 @@
+global
+    log         /dev/log local0
+    log         /dev/log local1 notice
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+    user        haproxy
+    group       haproxy
+    daemon
+
+defaults
+    log     global
+    mode    http
+    option  httplog
+    option  dontlognull
+    timeout connect 5s
+    timeout client  30s
+    timeout server  30s
+
+frontend demo_frontdoor
+    bind *:80
+    default_backend demo_applications
+
+backend demo_applications
+    balance roundrobin
+    option httpchk GET /health
+    http-check expect status 200
+    default-server inter 2s fall 2 rise 2
+    server dc1_app_01 ${dc1_app_ips[0]}:8080 check
+    server dc1_app_02 ${dc1_app_ips[1]}:8080 check
+    server dc2_app_01 ${dc2_app_ips[0]}:8080 check disabled
+    server dc2_app_02 ${dc2_app_ips[1]}:8080 check disabled

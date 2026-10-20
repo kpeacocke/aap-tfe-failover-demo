@@ -1,0 +1,35 @@
+#!/bin/bash
+set -euo pipefail
+
+dnf install -y curl haproxy socat
+
+cat > /etc/tmpfiles.d/ww-demo-haproxy.conf <<'TMPFILES'
+d /run/haproxy 0750 haproxy haproxy -
+TMPFILES
+systemd-tmpfiles --create /etc/tmpfiles.d/ww-demo-haproxy.conf
+
+cat > /etc/haproxy/haproxy.cfg <<'HAPROXY_CONFIG'
+${haproxy_config}
+HAPROXY_CONFIG
+
+cat > /etc/ww-demo-haproxy-backends <<'BACKENDS'
+DC1_APP_IP_1=${dc1_app_ip_1}
+DC1_APP_IP_2=${dc1_app_ip_2}
+DC2_APP_IP_1=${dc2_app_ip_1}
+DC2_APP_IP_2=${dc2_app_ip_2}
+BACKENDS
+chmod 0644 /etc/ww-demo-haproxy-backends
+
+cat > /usr/local/sbin/set-active-datacentre <<'SWITCH_SCRIPT'
+${switch_script}
+SWITCH_SCRIPT
+chmod 0755 /usr/local/sbin/set-active-datacentre
+
+cat > /etc/sudoers.d/ww-demo-haproxy-switch <<'SUDOERS'
+ec2-user ALL=(root) NOPASSWD: /usr/local/sbin/set-active-datacentre
+SUDOERS
+chmod 0440 /etc/sudoers.d/ww-demo-haproxy-switch
+visudo -cf /etc/sudoers.d/ww-demo-haproxy-switch
+
+systemctl enable haproxy
+systemctl restart haproxy
