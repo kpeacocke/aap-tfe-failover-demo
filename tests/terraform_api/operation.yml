@@ -1,0 +1,21 @@
+---
+- name: Exercise supported collection operations against the local API fixture
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  tasks:
+    - name: Discover demo workspaces
+      ansible.builtin.include_role:
+        name: terraform_workspace
+        public: true
+
+    - name: Apply the requested incident-owned workspace operation
+      ansible.builtin.include_role:
+        name: terraform_workspace
+        tasks_from: operation
+      vars:
+        terraform_workspace_dc: dc1
+        terraform_workspace_reference: INC123
+        terraform_workspace_action: "{{ test_action }}"

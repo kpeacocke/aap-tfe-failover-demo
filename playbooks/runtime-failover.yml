@@ -12,6 +12,7 @@
     runtime_health_delay_seconds: 3
     runtime_validation_samples: 8
     runtime_operation_marker: /run/ww-demo-failover.lock
+    runtime_terraform_enabled: true
 
   pre_tasks:
     - name: Validate runtime request and safety bounds
@@ -116,6 +117,34 @@
             fail_msg: Source still responds to health requests. Use planned mode to drain it safely.
           when: runtime_mode == 'failure'
 
+        - name: Require an unlocked target workspace before quarantining the source
+          ansible.builtin.include_role:
+            name: terraform_workspace
+            tasks_from: require_available
+            apply:
+              delegate_to: localhost
+              become: false
+              vars:
+                ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          vars:
+            terraform_workspace_dc: "{{ runtime_target_dc }}"
+          when: runtime_terraform_enabled | bool
+
+        - name: Quarantine the source workspace after target readiness and before traffic changes
+          ansible.builtin.include_role:
+            name: terraform_workspace
+            tasks_from: operation
+            apply:
+              delegate_to: localhost
+              become: false
+              vars:
+                ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          vars:
+            terraform_workspace_dc: "{{ runtime_source_dc }}"
+            terraform_workspace_reference: "{{ runtime_reference }}"
+            terraform_workspace_action: lock
+          when: runtime_terraform_enabled | bool
+
         - name: Switch traffic with health-gated rollback on failure
           block:
             - name: Preserve original datacentres for rollback
@@ -176,14 +205,17 @@
                 target_dc: "{{ runtime_target_dc }}"
                 drain: "{{ haproxy_state_drain_result }}"
                 validation: "{{ synthetic_validation_result }}"
-                terraform_workspace_quarantine: not_implemented_phase_3
+                terraform_workspace_quarantine: "{{ terraform_workspace_result if runtime_terraform_enabled | bool else 'disabled-isolated-runtime-test' }}"
 
         - name: Summarize validated runtime failover
           ansible.builtin.debug:
             msg:
               - "FAILOVER COMPLETE: {{ runtime_source_dc | upper }} -> {{ runtime_target_dc | upper }} ({{ runtime_reference }})"
               - "Target nodes healthy: 2/2; both served front-door traffic; source new sessions: 0."
-              - "Terraform workspaces are unchanged. Quarantine is Phase 3; AAP and Portal remain untouched."
+              - >-
+                {{ 'Source Terraform workspace remains quarantined until an explicit validated release.'
+                   if runtime_terraform_enabled | bool else 'Terraform integration disabled for isolated runtime tests.' }}
+              - "AAP and Portal remain untouched."
 
       always:
         - name: Release this operation's marker

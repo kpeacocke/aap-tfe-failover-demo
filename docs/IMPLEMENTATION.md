@@ -1732,10 +1732,10 @@ Ansible runtime roles:
 
 Prove failover from CLI.
 
-Phase 2 runtime roles and the CLI entrypoint are implemented. The entrypoint
-reads the existing Terraform roots' JSON outputs; API-based discovery/output
-retrieval and workspace lock/unlock remain Phase 3. AAP and Portal are not
-configured by Phase 2.
+Phase 2 runtime roles and the CLI entrypoint are implemented. At Phase 2
+completion the entrypoint read the existing Terraform roots' JSON outputs;
+Phase 3 replaces that discovery with API output retrieval and adds workspace
+lock/unlock. AAP and Portal are not configured by Phase 2.
 
 Live CLI validation on 2026-10-20 proved DC1-to-DC2 failover and DC2-to-DC1
 switchback, with both nodes at the active site serving front-door requests.
@@ -1754,9 +1754,9 @@ case uses TCP mode to hold an idle session deterministically; the remaining
 scenarios use HTTP mode like the deployed front door.
 
 Ansible/YAML/shell lint and the existing application and Phase 1 helper
-regressions pass. Phase 3 is next; do not claim Terraform workspace quarantine
-until it is implemented and validated. Failure simulation on the live AWS
-nodes, AAP objects, and Portal configuration remain later-phase work.
+regressions pass. Phase 3 completion and workspace quarantine evidence are
+recorded below. Failure simulation on the live AWS nodes, AAP objects, and
+Portal configuration remain later-phase work.
 
 ## Phase 3
 
@@ -1766,6 +1766,61 @@ TFE integration:
 - lock;
 - unlock;
 - retrieve outputs.
+
+Phase 3 is implemented and validated. The `terraform_workspace` role uses the
+verified `hashicorp.terraform` 2.2.1 collection interfaces, pinned from the
+official Git release, and `pytfe` 1.4.1. CLI wrappers discover the exact existing
+shared/DC1/DC2 workspaces and retrieve current output values without invoking
+Terraform CLI, accessing AWS or downloading full state files. Only allowlisted
+non-sensitive infrastructure outputs enter a private temporary inventory.
+API credentials stay on the Ansible controller.
+
+Runtime failover checks target health and current workspace availability, then
+quarantines the source before draining or activating servers. Lock reasons are
+stable per incident/change and datacentre; verification results include UTC
+timestamps. Repeated same-incident locks are idempotent. Unrelated or run-owned
+locks, API conflicts and missing permissions fail safely. The shared workspace
+is never mutated, and no force-unlock is used. Runtime errors and successful
+runtime rollback both retain quarantine.
+
+The explicit administrative normal-unlock helper requires the original
+reference, a healthy recovered site in maintenance and a validated healthy
+service at the other site. It neither repairs infrastructure nor switches
+traffic, and is not the full Phase 4 recovery workflow. Runtime and workspace
+CLI operations share the HAProxy-side exclusive marker. External Terraform
+administrators must coordinate: the normal unlock API has no atomic
+lock-reason comparison, and the marker cannot serialize outside clients.
+
+HCP Terraform Free is the live acceptance target. Operational API access also
+accepts an HTTPS Terraform Enterprise base URL/token and optional trusted CA;
+TLS verification is never disabled. Enterprise compatibility is verified with
+a local TLS API fixture, not a live Enterprise deployment. Provisioning remains
+HCP-only.
+
+Live validation on 2026-10-20 proved:
+
+- API discovery and non-sensitive output retrieval for all three workspaces;
+- source quarantine before DC1-to-DC2 traffic activation;
+- a locking Terraform plan against quarantined DC1 was rejected;
+- a failover to locked DC1 was rejected without changing traffic;
+- healthy-standby normal release with the original reference;
+- DC2-to-DC1 switchback with DC2 quarantined, followed by guarded DC2 release;
+- final healthy DC1 service, both DC1 nodes serving front-door requests and all
+  three workspaces available;
+- final locking Terraform plans for shared/DC1/DC2 all reported no changes.
+
+Local validation uses the real collection/SDK against a TLS JSON:API fixture
+(10 tests) and real HAProxy/four application processes in a disposable container.
+It covers output/authentication failures, permissions/conflicts, incident lock
+ownership, idempotent normal lock/unlock, locked-target refusal, active-site and
+unhealthy-standby release refusal, and retained quarantine after drain-timeout
+rollback. Application/Phase 1 helper regressions, Ansible/YAML/shell lint,
+Terraform formatting and validation pass. CI runs both credential-free fixtures.
+The Snyk code scan tool is unavailable in this environment; no successful Snyk
+scan is claimed.
+
+Phase 4 (AAP objects and workflow graph) is next. No AAP or Portal configuration
+has been implemented or changed in Phase 3.
 
 ## Phase 4
 

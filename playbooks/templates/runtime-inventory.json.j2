@@ -1,0 +1,24 @@
+{% set nodes = namespace(sites={}) %}
+{% for dc in ['dc1', 'dc2'] %}
+{% set site = namespace(nodes=[]) %}
+{% for index in range(2) %}
+{% set ignored = site.nodes.append({
+  'server': dc ~ '_app_0' ~ (index + 1),
+  'hostname': dc ~ '-app-0' ~ (index + 1),
+  'address': terraform_workspace_outputs[dc].application_private_ips.value[index],
+  'instance_id': terraform_workspace_outputs[dc].application_instance_ids.value[index],
+  'health_url': terraform_workspace_outputs[dc].health_urls.value[index]
+}) %}
+{% endfor %}
+{% set ignored = nodes.sites.update({dc: site.nodes}) %}
+{% endfor %}
+{{ {'all': {'children': {'haproxy': {'hosts': {'demo_haproxy': {
+  'ansible_host': terraform_workspace_outputs.shared.frontdoor_public_ip.value,
+  'ansible_user': 'ec2-user',
+  'ansible_ssh_private_key_file': runtime_ssh_private_key_path,
+  'ansible_ssh_common_args': '-o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10',
+  'runtime_frontdoor_url': terraform_workspace_outputs.shared.frontdoor_url.value,
+  'runtime_sites': nodes.sites,
+  'terraform_workspace_workspaces': terraform_workspace_workspaces,
+  'runtime_terraform_enabled': true
+}}}}}} | to_nice_json }}

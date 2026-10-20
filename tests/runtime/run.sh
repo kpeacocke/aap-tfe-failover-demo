@@ -90,6 +90,7 @@ run() {
     ansible-playbook -i "$fixture/inventory.json" playbooks/runtime-failover.yml \
         -e runtime_reference=TEST-PHASE2 -e runtime_health_delay_seconds=1 \
         -e runtime_health_retries=3 -e "runtime_operation_marker=$fixture/operation.lock" \
+        -e runtime_terraform_enabled=false \
         "$@" > "$fixture/result.log" 2>&1
 }
 require_success() {
@@ -222,3 +223,76 @@ awk -F, '$1=="demo_applications" && $2 ~ /^dc1_app_/ {sessions+=$5} END {exit se
 exec 3<&-
 exec 3>&-
 echo "PASS: a nonzero source session hits the drain timeout and restores the healthy source without killing sessions."
+
+python -B tests/terraform_api/support.py "$fixture/api.json" > "$fixture/api.log" 2>&1 &
+pids+=("$!")
+for ((attempt = 0; attempt < 100; attempt++)); do
+    if [[ -f "$fixture/api.json" ]]; then break; fi
+    sleep 0.1
+done
+export TFE_ADDRESS
+TFE_ADDRESS=$(jq -r .address "$fixture/api.json")
+export SSL_CERT_FILE
+SSL_CERT_FILE=$(jq -r .ca_bundle "$fixture/api.json")
+export TFE_TOKEN=fixture-token
+export HCP_TERRAFORM_ORGANIZATION=test-org
+jq -n '{terraform_workspace_workspaces:{
+    shared:{id:"ws-shared",name:"ww-demo-shared",locked:false},
+    dc1:{id:"ws-dc1",name:"ww-demo-dc1",locked:false},
+    dc2:{id:"ws-dc2",name:"ww-demo-dc2",locked:false}}}' > "$fixture/workspaces.json"
+
+workspace() {
+    ansible-playbook -i "$fixture/inventory.json" playbooks/terraform-workspace.yml \
+        -e "@$fixture/workspaces.json" -e "runtime_operation_marker=$fixture/operation.lock" \
+        -e workspace_cli_action="$1" -e workspace_cli_dc="$2" -e workspace_cli_reference=TEST-PHASE2 \
+        -e runtime_health_delay_seconds=1 -e runtime_health_retries=3 \
+        > "$fixture/result.log" 2>&1
+}
+
+if ! require_success -e runtime_target_dc=dc2 -e runtime_terraform_enabled=true -e "@$fixture/workspaces.json"; then
+    cat "$fixture/result.log"
+    exit 1
+fi
+require_active dc2
+if workspace unlock dc2; then echo "Released active-site quarantine unexpectedly."; exit 1; fi
+grep -Fq 'runtime state does not match' "$fixture/result.log"
+require_failure 'Target workspace ww-demo-dc1 is locked' \
+    -e runtime_target_dc=dc1 -e runtime_terraform_enabled=true -e "@$fixture/workspaces.json"
+require_active dc2
+if ! workspace unlock dc1; then cat "$fixture/result.log"; exit 1; fi
+require_success -e runtime_target_dc=dc1 -e runtime_terraform_enabled=true -e "@$fixture/workspaces.json"
+require_active dc1
+kill "$(cat "$fixture/app-3.pid")"
+if workspace unlock dc2; then echo "Released an unhealthy standby unexpectedly."; exit 1; fi
+grep -Fq 'is not ready' "$fixture/result.log"
+start_app 3
+printf '%s\n' "$app_pid" > "$fixture/app-3.pid"
+sleep 1
+if ! workspace unlock dc2; then cat "$fixture/result.log"; exit 1; fi
+require_active dc1
+echo "PASS: failover quarantines the source, refuses a locked target, and releases only healthy standby sites."
+
+exec 3<>/dev/tcp/127.0.0.1/8080
+sleep 0.2
+require_failure 'Rollback to dc1 validated successfully' -e runtime_target_dc=dc2 \
+    -e runtime_drain_timeout_seconds=1 -e runtime_terraform_enabled=true -e "@$fixture/workspaces.json"
+require_active dc1
+grep -Fq 'Drain timed out after 1s' "$fixture/result.log"
+python - <<'PY'
+import json
+import os
+import ssl
+import urllib.request
+
+request = urllib.request.Request(
+    os.environ["TFE_ADDRESS"] + "/api/v2/organizations/test-org/workspaces/ww-demo-dc1",
+    headers={"Authorization": "Bearer " + os.environ["TFE_TOKEN"]},
+)
+with urllib.request.urlopen(request, context=ssl.create_default_context(cafile=os.environ["SSL_CERT_FILE"])) as response:
+    attributes = json.load(response)["data"]["attributes"]
+assert attributes["locked"], "Runtime rollback must retain source quarantine"
+assert attributes["locked-reason"] == "Demo-managed datacentre quarantine - TEST-PHASE2 - dc1"
+PY
+exec 3<&-
+exec 3>&-
+echo "PASS: a failed API-integrated drain rolls back traffic but retains incident-owned source quarantine."

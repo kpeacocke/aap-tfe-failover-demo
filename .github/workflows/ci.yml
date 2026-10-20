@@ -42,11 +42,13 @@ jobs:
         run: bash tests/test-runtime-env.sh
       - name: Install Ansible validation tools
         run: |
-          pip install 'ansible-core==2.19.3' ansible-lint yamllint
+          pip install -r bootstrap/requirements.txt ansible-lint yamllint
           ansible-galaxy collection install -r bootstrap/requirements.yml
       - name: Lint Ansible runtime automation
         run: |
-          ansible-lint playbooks/runtime-failover.yml roles
-          yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles
+          ansible-lint playbooks/runtime-failover.yml playbooks/terraform-discover.yml playbooks/terraform-workspace.yml roles tests/terraform_api/operation.yml
+          yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles tests/terraform_api/operation.yml
+      - name: Test Terraform API integration without cloud credentials
+        run: bash tests/test-terraform-api.sh
       - name: Test runtime failover and failure handling without cloud credentials
         run: bash tests/test-runtime.sh

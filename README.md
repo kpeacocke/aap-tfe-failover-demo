@@ -3,7 +3,8 @@
 This repository demonstrates a small AWS application spanning two datacentres,
 fronted by HAProxy. The implementation is being delivered in phases; the
 completed phases provision the infrastructure and demonstrate both a manual
-traffic switch and a validated Ansible CLI failover.
+traffic switch and a validated Ansible CLI failover with Terraform workspace
+quarantine.
 
 The application is branded "Datacentre Failover Demo" for use with any customer.
 AWS demo tags use `Datacentre-Failover`. Existing `ww-demo-*` identifiers and
@@ -184,36 +185,62 @@ port 8080 is reachable only from HAProxy's security group. The remote switch
 command accepts only `dc1` or `dc2` and leaves the current backend untouched if
 the target health checks fail.
 
-## Phase 2: Ansible runtime failover
+## Phases 2 and 3: Ansible runtime failover and Terraform quarantine
 
 Phase 2 adds reusable `application_health`, `haproxy_state`, and
-`synthetic_validation` roles. It does not configure AAP/Portal, lock Terraform
-workspaces, or change AWS infrastructure.
+`synthetic_validation` roles. Phase 3 adds API-based workspace discovery,
+output retrieval and incident-owned quarantine. Neither phase configures
+AAP/Portal or changes AWS infrastructure.
 
-Use Ansible Core 2.19 or later and install the verified collection version:
+Use a Python virtual environment (tested with Python 3.12 and 3.14), and
+install the pinned Ansible Core, Python SDK and verified collections.
+`hashicorp.terraform` 2.2.1 is installed from its official Git release tag:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r bootstrap/requirements.txt
 ansible-galaxy collection install -r bootstrap/requirements.yml
+bash scripts/terraform-workspace.sh discover
 bash scripts/runtime-failover.sh dc2 CHG0012345
+# Verify DC1 is recovered and healthy before releasing its quarantine.
+bash scripts/terraform-workspace.sh unlock dc1 CHG0012345
 bash scripts/runtime-failover.sh dc1 CHG0012346
+bash scripts/terraform-workspace.sh unlock dc2 CHG0012346
 ```
 
-The wrapper loads `.env` and reads the three initialized Terraform roots'
-JSON outputs. It generates a private, temporary Ansible inventory rather than
-hardcoding IP addresses. `HAPROXY_PUBLIC_IP` remains useful for the Phase 1
-helper, but Phase 2 uses the actual shared output. SSH host-key verification
+The wrappers load `.env` and retrieve the existing workspaces and their current
+outputs through the Terraform API, without running Terraform CLI, accessing AWS,
+or downloading full state files. Only allowlisted, non-sensitive topology
+outputs enter the private, temporary inventory. `HAPROXY_PUBLIC_IP` remains
+useful for the Phase 1 helper, but these wrappers use the actual shared output.
+SSH host-key verification
 stays enabled; trust the HAProxy host's verified key before the first run.
 The presenter's machine needs SSH and HTTP access to the front door.
+
+The default endpoint is `https://app.terraform.io`, with
+`HCP_TERRAFORM_ORGANIZATION` and `TF_TOKEN_app_terraform_io`. The token needs
+workspace/current-output read access plus lock and normal-unlock permissions
+for both DC workspaces. Use the original locking identity for release. For an
+existing Terraform Enterprise deployment, operational discovery/lock/unlock
+also accept `TFE_ADDRESS` (HTTPS base URL), `TFE_TOKEN` and optional
+`SSL_CERT_FILE` (trusted CA bundle). TLS verification is always enabled; the HCP
+token is never used as a fallback for a different endpoint. The provisioning
+wrapper remains HCP-only. Enterprise compatibility is tested against a local
+TLS API fixture, not a live Enterprise installation.
 
 The default `planned` mode:
 
 1. Acquires an exclusive marker on HAProxy and discovers the actual active site.
 2. Verifies the backend addresses against Terraform outputs and requires both
    target nodes' health, datacentre, hostname, and version to match.
-3. Drains source servers, waits for zero active sessions, and places them in
+3. Rechecks that the target workspace is unlocked, then locks the source
+   workspace with a stable demo-managed incident/change reason and verifies
+   the authoritative lock state before changing traffic.
+4. Drains source servers, waits for zero active sessions, and places them in
    maintenance without killing established sessions.
-4. Activates the target through the runtime socket without restarting HAProxy.
-5. Checks every target node, samples eight external health requests, requires
+5. Activates the target through the runtime socket without restarting HAProxy.
+6. Checks every target node, samples eight external health requests, requires
    both target hosts to serve traffic, checks the application page, and verifies
    no new source sessions during validation.
 
@@ -239,7 +266,7 @@ bash scripts/runtime-failover.sh dc2 INC0012345 failure
 returns HTTP 200. It does not simulate an outage; do not stop live services just
 to try it. Fault injection is covered in the isolated test fixture.
 
-Concurrent Phase 2 operations are refused. If SSH or Ansible is interrupted,
+Concurrent runtime and workspace administrative operations are refused. If SSH or Ansible is interrupted,
 the marker `/run/ww-demo-failover.lock` may remain; inspect its `request.json`,
 confirm no operation is still running, and inspect actual HAProxy state before
 an administrator removes it. Do not run the legacy manual helper, Terraform
@@ -248,7 +275,40 @@ HAProxy restart still resets to Terraform's configured DC1-active default;
 persistent operational state is not implemented in this phase.
 
 Successful runs publish structured results with `ansible.builtin.set_stats`.
-No workspace quarantine is claimed: that is the next phase.
+The result includes the verified workspace ID, lock reason, reference and UTC
+verification time.
+
+### Workspace quarantine and release
+
+```bash
+bash scripts/terraform-workspace.sh discover
+bash scripts/terraform-workspace.sh lock dc1 INC0012345
+bash scripts/terraform-workspace.sh unlock dc1 INC0012345
+```
+
+Only `dc1` and `dc2` can be locked/released; the shared workspace is never
+mutated. Repeating a lock with the same reference is safe. An unrelated,
+different-incident or run-owned lock is refused, and no force-unlock is used.
+API conflicts, permissions failures and unconfirmed responses stop the
+operation rather than permitting traffic changes.
+
+Quarantine blocks locking Terraform plan/apply/destroy operations on the source
+workspace while leaving the healthy DC workspace available. Discovery and
+read-only output access remain possible. Do not bypass quarantine with
+`-lock=false`.
+
+Release requires the original reference, both recovered nodes healthy with the
+expected identity/version, the recovered site in HAProxy maintenance, and a
+validated healthy service at the other site. Unlocking neither switches traffic
+nor runs Terraform. This is an administrative Phase 3 building block, not the
+later AAP recovery workflow or an infrastructure repair.
+
+A failed transition retains quarantine even when runtime rollback succeeds.
+An active site cannot be released through this helper; inspect a rolled-back
+or interrupted operation before an administrator decides how to recover. Never
+automatically clear locks after errors. Coordinate with other Terraform users:
+the HAProxy marker serializes these CLIs, not outside administrators, and the
+normal Terraform unlock API has no atomic lock-reason comparison.
 
 ## Validate locally
 
@@ -263,11 +323,12 @@ bash tests/test-terraform-env.sh
 bash tests/test-ssh-key.sh
 bash tests/test-workspace.sh
 bash tests/test-runtime-env.sh
-ansible-lint playbooks/runtime-failover.yml roles
-yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles
+ansible-lint playbooks/runtime-failover.yml playbooks/terraform-discover.yml playbooks/terraform-workspace.yml roles tests/terraform_api/operation.yml
+yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles tests/terraform_api/operation.yml
 shellcheck scripts/*.sh terraform/shared/set-active-datacentre.sh tests/*.sh tests/runtime/*.sh roles/haproxy_state/files/*.sh
 # Requires Docker; disposable local fixture, no .env, cloud credentials or AWS changes.
 bash tests/test-runtime.sh
+bash tests/test-terraform-api.sh
 ```
 
 The runtime fixture uses real HAProxy and four copies of the demo application.
@@ -276,6 +337,12 @@ target failure with validated rollback, unavailable-source escalation,
 successful failure-mode switching, and nonzero-session drain timeout. The
 timeout case uses a TCP-mode fixture to hold an idle session deterministically;
 the other cases use the deployed HTTP-mode configuration.
+It also exercises API-integrated source quarantine, locked-target refusal,
+healthy-standby-only release and retained quarantine after runtime rollback.
+The separate TLS JSON:API fixture tests use the
+real pinned HashiCorp collection and Python SDK to cover authentication,
+output processing/validation, incident ownership, permissions, API conflicts
+and idempotent normal lock/unlock. Neither fixture mounts lab credentials.
 
 The Terraform validation initializes providers but does not contact AWS or
 create infrastructure. Applying the configuration creates billable AWS

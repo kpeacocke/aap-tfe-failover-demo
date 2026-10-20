@@ -1,0 +1,26 @@
+---
+- name: Validate Terraform endpoint and authentication configuration
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_address is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?$')
+      - terraform_workspace_organization is match('^[A-Za-z0-9_-]+$')
+      - >-
+        terraform_workspace_names == {'shared': 'ww-demo-shared', 'dc1': 'ww-demo-dc1', 'dc2': 'ww-demo-dc2'}
+    fail_msg: >-
+      Configure an HTTPS TFE_ADDRESS (default https://app.terraform.io), HCP_TERRAFORM_ORGANIZATION,
+      and TFE_TOKEN (or TF_TOKEN_app_terraform_io for HCP). Only the three demo workspaces are permitted.
+      Supply a trusted private CA through SSL_CERT_FILE when needed; TLS verification is always enabled.
+
+- name: Require a Terraform API token without displaying it
+  block:
+    - name: Check token presence
+      ansible.builtin.assert:
+        that:
+          - terraform_workspace_token | length > 0
+      no_log: true
+  rescue:
+    - name: Explain the missing Terraform credential
+      ansible.builtin.fail:
+        msg: >-
+          Terraform API token is missing. Set TFE_TOKEN, or TF_TOKEN_app_terraform_io
+          when using https://app.terraform.io. No API mutation has been attempted.

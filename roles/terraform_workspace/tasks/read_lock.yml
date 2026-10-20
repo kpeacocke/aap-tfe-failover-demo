@@ -1,0 +1,40 @@
+---
+- name: Read lock metadata without exposing authorization headers
+  block:
+    - name: Read authoritative workspace lock metadata
+      ansible.builtin.uri:
+        url: >-
+          {{ terraform_workspace_address }}/api/v2/organizations/{{ terraform_workspace_organization }}/workspaces/{{
+             terraform_workspace_names[terraform_workspace_dc] }}
+        headers:
+          Authorization: "Bearer {{ terraform_workspace_token }}"
+        return_content: true
+        follow_redirects: none
+        unredirected_headers: [Authorization]
+        ca_path: "{{ terraform_workspace_ca_bundle | default(omit, true) }}"
+        timeout: 15
+      register: terraform_workspace_lock_response
+      no_log: true
+  rescue:
+    - name: Report lock metadata failure
+      ansible.builtin.fail:
+        msg: >-
+          Cannot read lock ownership for {{ terraform_workspace_names[terraform_workspace_dc] }}
+          (HTTP {{ terraform_workspace_lock_response.status | default('unavailable') }}).
+          Check Terraform credentials, permissions, connectivity and TLS trust. Stop and inspect the workspace.
+
+- name: Validate authoritative workspace identity and lock fields
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_lock_response.json.data.type == 'workspaces'
+      - terraform_workspace_lock_response.json.data.id == terraform_workspace_workspaces[terraform_workspace_dc].id
+      - terraform_workspace_lock_response.json.data.attributes.name == terraform_workspace_names[terraform_workspace_dc]
+      - terraform_workspace_lock_response.json.data.relationships.organization.data.id == terraform_workspace_organization
+      - terraform_workspace_lock_response.json.data.attributes.locked is boolean
+      - terraform_workspace_lock_response.json.data.attributes['locked-reason'] is defined
+    fail_msg: Cannot verify workspace identity and lock metadata. No lock action is safe.
+
+- name: Retain verified lock metadata
+  ansible.builtin.set_fact:
+    terraform_workspace_lock_attributes: "{{ terraform_workspace_lock_response.json.data.attributes }}"
+    terraform_workspace_lock_owner: "{{ terraform_workspace_lock_response.json.data.relationships['locked-by'].data | default(none) }}"

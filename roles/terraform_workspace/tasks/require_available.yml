@@ -1,0 +1,14 @@
+---
+- name: Validate Terraform API connection inputs
+  ansible.builtin.include_tasks: connect.yml
+
+- name: Inspect target workspace immediately before quarantine
+  ansible.builtin.include_tasks: read_lock.yml
+
+- name: Require the target workspace to be available
+  ansible.builtin.assert:
+    that:
+      - not terraform_workspace_lock_attributes.locked
+    fail_msg: >-
+      Target workspace {{ terraform_workspace_names[terraform_workspace_dc] }} is locked.
+      Release it only after recovery validation. Source traffic and source quarantine have not been changed.

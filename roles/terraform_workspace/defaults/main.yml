@@ -1,0 +1,15 @@
+---
+terraform_workspace_address: "{{ lookup('ansible.builtin.env', 'TFE_ADDRESS') | default('https://app.terraform.io', true) | regex_replace('/$', '') }}"
+terraform_workspace_token: >-
+  {{ lookup('ansible.builtin.env', 'TFE_TOKEN') |
+     default(lookup('ansible.builtin.env', 'TF_TOKEN_app_terraform_io') if terraform_workspace_address == 'https://app.terraform.io' else '', true) }}
+terraform_workspace_organization: "{{ lookup('ansible.builtin.env', 'HCP_TERRAFORM_ORGANIZATION') }}"
+terraform_workspace_ca_bundle: "{{ lookup('ansible.builtin.env', 'SSL_CERT_FILE') }}"
+terraform_workspace_names:
+  shared: ww-demo-shared
+  dc1: ww-demo-dc1
+  dc2: ww-demo-dc2
+terraform_workspace_required_outputs:
+  shared: [frontdoor_public_ip, frontdoor_url, haproxy_private_ip]
+  dc1: [datacentre_name, application_private_ips, application_instance_ids, health_urls]
+  dc2: [datacentre_name, application_private_ips, application_instance_ids, health_urls]

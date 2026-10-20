@@ -20,7 +20,7 @@ if [[ ! "$drain_timeout" =~ ^[1-9][0-9]{0,2}$ || "$drain_timeout" -gt 600 ]]; th
     exit 2
 fi
 
-for executable in terraform jq ansible-playbook; do
+for executable in jq ansible-playbook; do
     if ! command -v "$executable" >/dev/null 2>&1; then
         echo "Required command is missing: $executable" >&2
         exit 1
@@ -37,15 +37,9 @@ fi
 
 umask 077
 fixture=$(mktemp -d)
-trap 'rm -f "$fixture/shared.json" "$fixture/dc1.json" "$fixture/dc2.json" "$fixture/inventory.json"; rmdir "$fixture"' EXIT
-for root in shared dc1 dc2; do
-    bash "$script_dir/terraform.sh" "$root" output -json > "$fixture/$root.json"
-done
-
-jq -n -e \
-    --slurpfile shared "$fixture/shared.json" \
-    --slurpfile dc1 "$fixture/dc1.json" \
-    --slurpfile dc2 "$fixture/dc2.json" \
+trap 'rm -f "$fixture/request.json" "$fixture/inventory.json"; rmdir "$fixture"' EXIT
+jq -n \
+    --arg path "$fixture/inventory.json" \
     --arg key "$ssh_key" \
     --arg target "$1" \
     --arg reference "$2" \
@@ -53,36 +47,17 @@ jq -n -e \
     --arg version "${TF_VAR_application_version:-1.0.0}" \
     --arg drain_timeout "$drain_timeout" \
     '
-    def nodes($dc):
-      if $dc.datacentre_name.value as $name |
-        ($name | test("^dc[12]$")) and
-        ($dc.application_private_ips.value | length == 2) and
-        ($dc.health_urls.value | length == 2)
-      then [range(0; 2) as $i |
-        {server: ($dc.datacentre_name.value + "_app_0" + (($i + 1) | tostring)),
-         hostname: ($dc.datacentre_name.value + "-app-0" + (($i + 1) | tostring)),
-         address: $dc.application_private_ips.value[$i],
-         health_url: $dc.health_urls.value[$i]}]
-      else error("Missing or invalid datacentre outputs; provision both DCs first") end;
-    if ($shared[0].frontdoor_public_ip.value | type == "string" and length > 0) and
-       ($shared[0].frontdoor_url.value | type == "string" and length > 0) and
-       $dc1[0].datacentre_name.value == "dc1" and $dc2[0].datacentre_name.value == "dc2"
-    then {all: {children: {haproxy: {hosts: {demo_haproxy: {
-      ansible_host: $shared[0].frontdoor_public_ip.value,
-      ansible_user: "ec2-user",
-      ansible_ssh_private_key_file: $key,
-      ansible_ssh_common_args: "-o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10",
-      runtime_frontdoor_url: $shared[0].frontdoor_url.value,
-      runtime_sites: {dc1: nodes($dc1[0]), dc2: nodes($dc2[0])},
+    {
+      terraform_workspace_inventory_path: $path,
+      runtime_ssh_private_key_path: $key,
       runtime_target_dc: $target,
       runtime_reference: $reference,
       failover_mode: $mode,
       failover_application_version: $version,
       failover_drain_timeout_seconds: ($drain_timeout | tonumber)
-    }}}}}}
-    else error("Missing shared outputs or incorrect DC identity; provision all roots first") end
-    ' > "$fixture/inventory.json"
+    }' > "$fixture/request.json"
 
 cd "$repo_root"
 export ANSIBLE_CONFIG="$repo_root/ansible.cfg"
-ansible-playbook -i "$fixture/inventory.json" playbooks/runtime-failover.yml
+ansible-playbook -i localhost, playbooks/terraform-discover.yml -e "@$fixture/request.json"
+ansible-playbook -i "$fixture/inventory.json" playbooks/runtime-failover.yml -e "@$fixture/request.json"

@@ -1,0 +1,107 @@
+---
+- name: Validate workspace operation inputs
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - terraform_workspace_dc | default('') in ['dc1', 'dc2']
+      - terraform_workspace_reference | default('') is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+      - terraform_workspace_action in ['lock', 'unlock']
+      - terraform_workspace_workspaces[terraform_workspace_dc].name == terraform_workspace_names[terraform_workspace_dc]
+    fail_msg: Only dc1/dc2 and a valid incident/change reference may be used for workspace operations; check mode is not supported.
+
+- name: Validate Terraform API connection inputs
+  ansible.builtin.include_tasks: connect.yml
+
+- name: Define this incident's stable quarantine reason
+  ansible.builtin.set_fact:
+    terraform_workspace_expected_reason: >-
+      Demo-managed datacentre quarantine - {{ terraform_workspace_reference }} - {{ terraform_workspace_dc }}
+
+- name: Inspect current lock before choosing an action
+  ansible.builtin.include_tasks: read_lock.yml
+
+- name: Reject a lock not owned by this demo incident
+  ansible.builtin.assert:
+    that:
+      - >-
+        not terraform_workspace_lock_attributes.locked or
+        (terraform_workspace_lock_attributes['locked-reason'] == terraform_workspace_expected_reason and
+         terraform_workspace_lock_owner is mapping and terraform_workspace_lock_owner.type == 'users')
+    fail_msg: >-
+      {{ terraform_workspace_names[terraform_workspace_dc] }} has an unrelated or run-owned lock.
+      Refusing to replace or release it. Check the incident and lock owner in Terraform.
+
+- name: Require permission for a new workspace lock
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_lock_attributes.permissions['can-lock']
+    fail_msg: Token cannot lock the source workspace. Traffic must not be changed.
+  when:
+    - terraform_workspace_action == 'lock'
+    - not terraform_workspace_lock_attributes.locked
+
+- name: Require normal unlock permission
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_lock_attributes.permissions['can-unlock']
+    fail_msg: Token cannot normally unlock this workspace. Use the original locking identity; force unlock is never used.
+  when:
+    - terraform_workspace_action == 'unlock'
+    - terraform_workspace_lock_attributes.locked
+
+- name: Apply the operation without exposing credentials or swallowing conflicts
+  block:
+    - name: Apply a supported workspace lock or normal unlock
+      hashicorp.terraform.workspace:
+        tfe_address: "{{ terraform_workspace_address }}"
+        tfe_token: "{{ terraform_workspace_token }}"
+        tfe_ca_bundle: "{{ terraform_workspace_ca_bundle | default(omit, true) }}"
+        tfe_timeout: 15
+        tfe_max_retries: 0
+        workspace_id: "{{ terraform_workspace_workspaces[terraform_workspace_dc].id }}"
+        state: "{{ 'locked' if terraform_workspace_action == 'lock' else 'unlocked' }}"
+        lock_reason: "{{ terraform_workspace_expected_reason if terraform_workspace_action == 'lock' else omit }}"
+        force: false
+      when: >-
+        (terraform_workspace_action == 'lock' and not terraform_workspace_lock_attributes.locked) or
+        (terraform_workspace_action == 'unlock' and terraform_workspace_lock_attributes.locked)
+      no_log: true
+  rescue:
+    - name: Report an unconfirmed workspace operation
+      ansible.builtin.fail:
+        msg: >-
+          Terraform {{ terraform_workspace_action }} failed or its response was lost for
+          {{ terraform_workspace_names[terraform_workspace_dc] }}. Do not change traffic or assume release succeeded.
+          Inspect the current lock owner/reason and permissions before retrying with the same reference.
+          No force unlock or automatic compensating unlock is attempted.
+
+- name: Verify the authoritative state after the operation
+  ansible.builtin.include_tasks: read_lock.yml
+
+- name: Require the requested verified lock state
+  ansible.builtin.assert:
+    that:
+      - >-
+        terraform_workspace_action != 'lock' or
+        (terraform_workspace_lock_attributes.locked and
+         terraform_workspace_lock_attributes['locked-reason'] == terraform_workspace_expected_reason and
+         terraform_workspace_lock_owner is mapping and terraform_workspace_lock_owner.type == 'users')
+      - terraform_workspace_action != 'unlock' or not terraform_workspace_lock_attributes.locked
+    fail_msg: Terraform did not confirm the requested lock state. Stop and inspect the workspace; do not continue runtime changes.
+
+- name: Record the verified workspace result
+  ansible.builtin.set_fact:
+    terraform_workspace_result:
+      workspace_id: "{{ terraform_workspace_workspaces[terraform_workspace_dc].id }}"
+      workspace_name: "{{ terraform_workspace_names[terraform_workspace_dc] }}"
+      locked: "{{ terraform_workspace_lock_attributes.locked }}"
+      reason: "{{ terraform_workspace_lock_attributes['locked-reason'] }}"
+      reference: "{{ terraform_workspace_reference }}"
+      verified_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+
+- name: Report verified workspace state
+  ansible.builtin.debug:
+    msg: >-
+      {{ terraform_workspace_result.workspace_name }}:
+      {{ 'LOCKED' if terraform_workspace_result.locked else 'AVAILABLE' }}
+      ({{ terraform_workspace_reference }}).

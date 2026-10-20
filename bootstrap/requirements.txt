@@ -1,0 +1,2 @@
+ansible-core==2.19.3
+pytfe==1.4.1

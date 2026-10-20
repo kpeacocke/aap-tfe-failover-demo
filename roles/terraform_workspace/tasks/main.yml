@@ -1,0 +1,14 @@
+---
+- name: Validate Terraform API connection inputs
+  ansible.builtin.include_tasks: connect.yml
+
+- name: Initialize discovered workspace and output maps
+  ansible.builtin.set_fact:
+    terraform_workspace_workspaces: {}
+    terraform_workspace_outputs: {}
+
+- name: Discover each existing demo workspace and its required outputs
+  ansible.builtin.include_tasks: discover.yml
+  loop: [shared, dc1, dc2]
+  loop_control:
+    loop_var: terraform_workspace_site

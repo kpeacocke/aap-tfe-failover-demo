@@ -1,0 +1,98 @@
+---
+- name: Discover the exact existing workspace without exposing authentication
+  block:
+    - name: Discover existing workspace by exact organization and name
+      hashicorp.terraform.workspace_info:
+        tfe_address: "{{ terraform_workspace_address }}"
+        tfe_token: "{{ terraform_workspace_token }}"
+        tfe_ca_bundle: "{{ terraform_workspace_ca_bundle | default(omit, true) }}"
+        tfe_timeout: 15
+        tfe_max_retries: 0
+        organization: "{{ terraform_workspace_organization }}"
+        workspace: "{{ terraform_workspace_names[terraform_workspace_site] }}"
+      register: terraform_workspace_discovered
+      no_log: true
+  rescue:
+    - name: Report workspace discovery failure
+      ansible.builtin.fail:
+        msg: >-
+          Cannot discover {{ terraform_workspace_names[terraform_workspace_site] }} at {{ terraform_workspace_address }}.
+          Check organization, token read permissions, network/TLS trust, and the installed pytfe dependency.
+          Missing workspaces must be provisioned first; no workspace was created or changed.
+
+- name: Require the discovered workspace identity
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_discovered.workspace.name == terraform_workspace_names[terraform_workspace_site]
+      - terraform_workspace_discovered.workspace.id is match('^ws-[A-Za-z0-9]+$')
+      - terraform_workspace_discovered.workspace.organization.id == terraform_workspace_organization
+      - terraform_workspace_discovered.workspace.locked is boolean
+    fail_msg: "Unexpected Terraform workspace identity for {{ terraform_workspace_site }}; refusing to continue."
+
+- name: Retrieve outputs without exposing authentication or sensitive output values
+  block:
+    - name: Retrieve current outputs without downloading Terraform state
+      hashicorp.terraform.output:
+        tfe_address: "{{ terraform_workspace_address }}"
+        tfe_token: "{{ terraform_workspace_token }}"
+        tfe_ca_bundle: "{{ terraform_workspace_ca_bundle | default(omit, true) }}"
+        tfe_timeout: 15
+        tfe_max_retries: 0
+        workspace_id: "{{ terraform_workspace_discovered.workspace.id }}"
+        display_sensitive: false
+      register: terraform_workspace_current_outputs
+      until: terraform_workspace_current_outputs is succeeded
+      retries: 2
+      delay: 2
+      no_log: true
+  rescue:
+    - name: Report output retrieval failure
+      ansible.builtin.fail:
+        msg: >-
+          Cannot retrieve current outputs for {{ terraform_workspace_names[terraform_workspace_site] }}.
+          Check state-output read permissions and that provisioning has completed and outputs have finished processing.
+          No Terraform state file was downloaded and no infrastructure was changed.
+
+- name: Require unique non-sensitive infrastructure outputs
+  ansible.builtin.assert:
+    that:
+      - >-
+        terraform_workspace_current_outputs.outputs | selectattr('name', 'equalto', item) | list | length == 1
+      - >-
+        not (terraform_workspace_current_outputs.outputs | selectattr('name', 'equalto', item) | first).sensitive
+      - >-
+        (terraform_workspace_current_outputs.outputs | selectattr('name', 'equalto', item) | first).value is not none
+    fail_msg: "Required output {{ item }} in {{ terraform_workspace_names[terraform_workspace_site] }} is missing, duplicated, null or sensitive."
+  loop: "{{ terraform_workspace_required_outputs[terraform_workspace_site] }}"
+
+- name: Retain only required infrastructure outputs
+  ansible.builtin.set_fact:
+    terraform_workspace_site_outputs: {}
+
+- name: Normalize allowlisted output values
+  ansible.builtin.set_fact:
+    terraform_workspace_site_outputs: >-
+      {{ terraform_workspace_site_outputs | combine({item.name: {'value': item.value}}) }}
+  loop: "{{ terraform_workspace_current_outputs.outputs }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: item.name in terraform_workspace_required_outputs[terraform_workspace_site]
+  no_log: true
+
+- name: Record workspace and allowlisted outputs
+  ansible.builtin.set_fact:
+    terraform_workspace_workspaces: >-
+      {{ terraform_workspace_workspaces | combine({terraform_workspace_site: {
+           'id': terraform_workspace_discovered.workspace.id,
+           'name': terraform_workspace_discovered.workspace.name,
+           'locked': terraform_workspace_discovered.workspace.locked}}) }}
+    terraform_workspace_outputs: >-
+      {{ terraform_workspace_outputs | combine({terraform_workspace_site: terraform_workspace_site_outputs}) }}
+
+- name: Report successful workspace discovery
+  ansible.builtin.debug:
+    msg: >-
+      {{ terraform_workspace_names[terraform_workspace_site] }}:
+      {{ terraform_workspace_discovered.workspace.id }},
+      {{ 'LOCKED' if terraform_workspace_discovered.workspace.locked else 'AVAILABLE' }};
+      required outputs retrieved.
