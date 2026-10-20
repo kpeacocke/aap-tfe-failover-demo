@@ -29,7 +29,7 @@ private key or modify personal SSH credentials.
 Internet
    |
    v
-HAProxy :80 (public Elastic IP; SSH limited to administrator CIDR)
+HAProxy :80 (public Elastic IP; SSH limited to verified presenter/AAP /32s)
    |
    +-- DC1 subnet: dc1-app-01, dc1-app-02 (TCP/8080)
    |
@@ -124,7 +124,7 @@ infrastructure mutations must be avoided.
 
 - HAProxy runtime state resets to DC1 on restart or replacement.
 - Portal templates/deployment and full end-to-end bootstrap/teardown remain
-  later phases. Phase 4 live workflow validation must pass before continuing.
+  later phases. Phase 4 is live-validated; Portal is Phase 5.
 - The Phase 1 manual switch helper bypasses Phase 3 quarantine; use the Ansible
   CLI for integrated operations and do not run both concurrently.
 - Enterprise endpoint compatibility is fixture-tested; live acceptance uses

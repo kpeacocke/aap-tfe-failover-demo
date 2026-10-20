@@ -330,6 +330,12 @@ image namespace grants AAP service accounts pull access; existing execution
 environments and cluster-wide platform configuration are not replaced.
 The AAP reference uses the resulting immutable image digest.
 
+Phase 4 is live-validated: AAP completed failover and recovery in both
+directions, including recovery launched by the restricted operator. The demo
+finished with DC1 active, all three Terraform workspaces unlocked and no
+Terraform drift. See the [recorded acceptance evidence](docs/IMPLEMENTATION.md#phase-4).
+Portal deployment/configuration remains Phase 5.
+
 ### Configure AAP
 
 Set these in the private `.env`:
@@ -425,6 +431,8 @@ The final evidence job publishes the machine-readable `demo_workflow_result` art
 including workflow/reference, sites, outcome, drain result, observed lock
 state, validation and timestamps. Use the workflow's graph and child jobs to
 inspect a failure; never clear locks automatically after a CLI timeout.
+Child-job output is for administrators: workflow execution permission does not
+grant the restricted operator access to underlying stage-job details.
 
 ### Restricted execution
 

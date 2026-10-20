@@ -1848,8 +1848,9 @@ registry. A namespace-scoped image-puller binding permits AAP service accounts
 to pull this image. No AAP/OpenShift installation or upgrade, existing EE
 replacement or Portal configuration is included.
 
-The source follows the public Git repository's configured revision (`main` by
-default); an immutable image digest is required for AAP. An administrator-only
+The AAP project follows the public Git repository's configured revision (`main`
+by default). The image-build wrapper uses the current local commit SHA, which
+must be pushed first; an immutable image digest is required for AAP. An administrator-only
 readiness job verifies the Python SDK, Terraform API and AWS account and
 reports the execution pod's IPv4 egress. Terraform's shared root accepts that
 verified optional `aap_ssh_cidr` `/32`, preserving presenter access and adding
@@ -1877,9 +1878,45 @@ retained job output, rather than relying on a local file surviving an ephemeral
 execution pod. Failure evidence remains a failing leaf after successful
 runtime rollback; quarantine is never automatically released on errors.
 
-Phase 4 validation is in progress. Do not start Phase 5 until the local
-multi-job tests, live AAP reconciliation/RBAC checks and full failover/recovery
-acceptance pass.
+Phase 4 live validation completed on 2026-10-20 (UTC):
+
+- The dedicated EE built successfully in the existing OpenShift internal
+  registry and passed the actual AAP readiness job. Terraform added only its
+  verified execution-egress `/32` to HAProxy SSH ingress, preserving presenter
+  access; no infrastructure was replaced.
+- Common bootstrap and demo setup succeeded, and a second complete
+  reconciliation reused the resources and preserved credentials.
+- Workflow **27** failed over DC1 to DC2 using eight separate successful jobs.
+  Its evidence confirmed both target nodes, zero new source requests and
+  incident-owned source quarantine. A real locking Terraform plan on DC1 was
+  rejected while quarantined.
+- Restricted operator `ww-demo-operator` launched recovery workflow **41**.
+  Its nine successful jobs normally unlocked healthy DC1 without switching
+  traffic away from DC2. Unauthorized launch overrides were rejected. Operator
+  stage/admin launches returned HTTP 403; credentials and inventories were
+  not visible, and underlying stage-job detail remained restricted.
+- Workflow **57** switched traffic back to DC1, and recovery workflow **71**
+  normally released DC2 without changing active traffic. Every workflow
+  retained a single consistent source revision across its executed stages and
+  published the expected `demo_workflow_result` evidence.
+- Final API reads confirmed all three workspaces unlocked. All three normal
+  locking Terraform plans reported no changes. Eight external health requests
+  reached both healthy DC1 nodes, the browser showed the healthy generic DC1
+  application, and the owned HAProxy marker was absent.
+- Application/helper regressions, all 10 real-collection Terraform API tests,
+  separate-process workflow success/failure/ownership/rollback tests,
+  configuration guards, Ansible/YAML/shell lint and Terraform
+  formatting/validation passed. The full published implementation CI run
+  [passed](https://github.com/kpeacocke/aap-tfe-failover-demo/actions/runs/39429989588).
+
+The presenter explicitly approved disabling certificate verification only for
+the disposable lab's self-signed OpenShift API; secure defaults and private-CA
+support remain unchanged. Operational Terraform and AAP connections retained
+TLS verification. The Snyk code scan tool is unavailable, so no successful
+Snyk scan is claimed.
+
+Phase 4 is complete. Phase 5 (Portal on the existing OpenShift cluster) is next
+and has not been implemented or configured.
 
 ## Phase 5
 
