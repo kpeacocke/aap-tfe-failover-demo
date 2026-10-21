@@ -30,6 +30,14 @@ Use [the validation guide](docs/validation.md) and the exact recipe in
 full PR CI must pass before merge. Documentation changes should check relative
 links, commands against actual wrappers and all referenced prerequisites.
 
+Follow [.editorconfig](.editorconfig) for UTF-8, LF, final newlines and existing
+indentation; Markdown hard-break spaces are preserved. [.gitattributes](.gitattributes)
+normalizes source/template line endings and leaves binary files untouched.
+[.gitignore](.gitignore) excludes private environment variants, Terraform inputs/
+plans/state and generated tool output, while examples and dependency lockfiles
+remain versioned. Ignore rules do not protect already tracked files or replace
+secret scanning; inspect staged changes before committing.
+
 Normal PR validation must remain credential-free and must not create resources,
 run live workflows, stop instances or read a maintainer's environment file.
 Live tests need separate explicit approval, isolated lab credentials and the

@@ -5,7 +5,7 @@
 ## Operator boundaries
 
 | Role | Approved activity |
-|---|---|
+| --- | --- |
 | Restricted Portal user | Two fixed failover/recovery templates; no supplied infrastructure credentials or arbitrary job parameters |
 | Lab administrator | Bootstrap, read-only inspection, credential maintenance, explicit failure simulation, interruption review and teardown |
 | Terraform administrator | Reviewed infrastructure lifecycle and state maintenance; never concurrent with active demo operations |
@@ -90,7 +90,7 @@ to reset the presentation.
 ## Administrative tools
 
 | Entrypoint | Purpose / caution |
-|---|---|
+| --- | --- |
 | `aap-configure.sh check` | Verify existing AAP version/authentication |
 | `aap-configure.sh inspect` / `inspect-openshift` | Inspect platform metadata privately |
 | `aap-configure.sh build-ee` | Reconcile/build demo image from a published local commit |
@@ -118,7 +118,7 @@ deployment guide.
 ## Credentials and retained material
 
 | Material | Owner action |
-|---|---|
+| --- | --- |
 | Private `.env` | Protect with mode 0600, restrict machine access, rotate/revoke expired lab credentials |
 | `.local/ssh/ww-demo` | Unencrypted dedicated private key; protect and securely back up if reusing |
 | `.local/aap-operator-password` | Hand to the authorized operator through an approved private channel only |
