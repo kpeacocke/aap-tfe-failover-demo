@@ -12,8 +12,12 @@
 - name: Declare only exact demo objects absent
   ansible.builtin.set_fact:
     lifecycle_absent_objects: >-
-      {{ lifecycle_absent_objects + [{'name': item, 'organization': demo_lifecycle_org_name, 'state': 'absent'}] }}
-  loop: "{{ lifecycle_object.names }}"
+      {{ lifecycle_absent_objects +
+         [dict(name=item.name, organization=demo_lifecycle_org_name, state='absent') |
+          combine({'credential_type': item.credential_type} if lifecycle_object.endpoint == 'credentials' else {}) |
+          combine({'image': item.image} if lifecycle_object.endpoint == 'execution_environments' else {})] }}
+  loop: "{{ lifecycle_verified_objects[lifecycle_object.endpoint] }}"
+  no_log: true
 
 - name: Publish the single verified dispatcher variable
   ansible.builtin.set_fact:

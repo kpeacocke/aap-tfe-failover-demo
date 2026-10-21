@@ -4,7 +4,8 @@ This repository demonstrates a small AWS application spanning two datacentres,
 fronted by HAProxy. It includes Terraform provisioning, staged AAP 2.7
 failover/recovery, a restricted Self-Service Automation Portal, guarded
 lifecycle automation and automated validation. The live failure/recovery
-acceptance is complete; destructive teardown/recreation remains unverified.
+acceptance and authorized destructive teardown are complete. Recreation after
+that teardown remains unverified; the supplied lab demo is now offline.
 
 The application is branded "Datacentre Failover Demo" for use with any customer.
 AWS demo tags use `Datacentre-Failover`. Existing `ww-demo-*` identifiers and
@@ -663,14 +664,27 @@ Do not blindly clear the marker or retry with force unlock. An interrupted
 teardown requires administrator review before explicitly clearing its stale
 marker and resuming. Avoid concurrent out-of-band administrative changes.
 
-Phase 6 live validation is limited, by presenter choice, to bootstrap
+Initial Phase 6 live validation was limited, by presenter choice, to bootstrap
 reconciliation and non-destructive teardown preflight. Destructive
-teardown/recreation has **not** been run against the lab.
+teardown had not yet been run at that acceptance snapshot.
 Those non-destructive checks passed, including repeat credential reuse, all
 three real destroy-plan ownership checks and three restricted-browser tests.
 The existing demo remains healthy on DC1 with all workspaces unlocked.
 That is the Phase 6 acceptance snapshot, not a promise about later presenter
 operations. Inspect actual traffic and quarantine before any new live test.
+
+Subsequent explicit teardown authorization was completed after Phase 8:
+DC1, DC2 and shared AWS infrastructure were destroyed, verified demo AAP
+content and the Portal Helm release were removed, and all three empty HCP
+workspaces were safe-deleted. Independent read-only checks passed for absent
+AWS infrastructure/workspaces/content, retained Portal PVCs/Secrets/namespaces,
+and available existing AAP/OpenShift. Local keys and credentials remain for
+reuse. Recreation has not been attempted.
+
+Live teardown exposed required absent-state fields in the installed
+configuration roles: credential type and execution-environment image now come
+from ownership-verified API records. Safe-delete requests include HCP's required
+JSON:API content type. Production-task regression tests cover these contracts.
 
 ```bash
 # Credential-free production-task regression tests:
@@ -786,7 +800,9 @@ addresses and instance IDs remain stable. After recovery, inspect a Terraform
 refresh-only plan before reconciling changed public-IP outputs; do not apply a
 normal infrastructure-changing plan merely to finish a smoke test.
 
-The Phase 6 destructive lifecycle remains **unverified** and was not authorized.
+Destructive teardown was not part of Phase 7 authorization; it was subsequently
+authorized and completed after Phase 8 as recorded above. Recreation remains
+unverified.
 GitHub `demo-live` environment configuration remains an operator prerequisite;
 the real acceptance ran the committed smoke locally, not via Actions dispatch.
 Do not treat mocked helper tests as live failure acceptance. Phase 8 presenter

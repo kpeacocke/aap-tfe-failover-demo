@@ -79,6 +79,7 @@
             method: POST
             headers:
               Authorization: "Bearer {{ lifecycle_token }}"
+              Content-Type: application/vnd.api+json
             status_code: [204]
             follow_redirects: none
             unredirected_headers: [Authorization]

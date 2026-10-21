@@ -2095,7 +2095,8 @@ Phase 6 non-destructive validation passed on the supplied lab:
   suites passed. The existing CI is wired to these focused lifecycle tests.
 - Final state remains healthy DC1 through both active nodes, unlocked local
   workspaces and no operation marker. Destructive apply/removal/safe-delete
-  acceptance remains explicitly unverified.
+  acceptance was explicitly unverified at this initial Phase 6 snapshot.
+  See the subsequent authorized teardown acceptance below.
 
 ## Phase 7
 
@@ -2155,8 +2156,8 @@ Automated testing and CI.
   unlocked. It never silently cleans guards or auto-compensates on failure.
 - Initial validation was read-only. The user subsequently authorized guarded
   incident reconciliation, reset and full live failure/recovery acceptance.
-  Actual destructive Phase 6 teardown/recreation remains unverified and outside
-  that authorization.
+  Destructive teardown/recreation was outside that Phase 7 authorization.
+  Teardown was subsequently authorized after Phase 8; see the acceptance below.
 
 Phase 7 safe-scope validation:
 
@@ -2252,8 +2253,41 @@ Phase 8 validation:
   four application tests and all three Terraform validations pass.
 - The historical local run sheet is left untouched and uncommitted; the new
   portable runbook is canonical. There are no further numbered implementation
-  phases. Destructive lifecycle testing remains a separately authorized
-  outstanding acceptance boundary, not a completed test.
+  phases. Destructive lifecycle testing was a separately authorized outstanding
+  acceptance boundary at this Phase 8 snapshot.
+
+## Subsequent authorized teardown acceptance
+
+After all eight phases, the user explicitly selected destruction of demo
+resources and safe deletion of emptied HCP workspaces while retaining reusable
+identity and storage. This teardown is complete; recreation is not tested.
+
+- The real non-destructive preflight passed. Confirmed saved-plan applies
+  destroyed DC1, DC2 and shared AWS infrastructure in dependency order.
+- Live cleanup exposed two installed-role absent-state requirements:
+  credentials require `credential_type`, and execution environments require
+  `image`. Removal declarations now preserve those fields from previously
+  ownership-verified API records and skip already absent objects.
+- Initial cleanup stopped explicitly at the missing execution-environment
+  image. All three Terraform states were inspected and empty before resuming
+  through the unchanged lifecycle guards. No marker stealing or force-unlock
+  was used.
+- Platform cleanup succeeded. The first safe-delete requests returned HTTP
+  415; adding the required `application/vnd.api+json` content type corrected
+  them. A final full guarded run exited 0 and safe-deleted all three workspaces.
+- Independent read-only acceptance exited 0 with 21 successful tasks and no
+  changes: no non-terminated demo instances, VPCs, Elastic IPs or EC2 key
+  registrations; all three exact workspace IDs return 404; all six demo AAP
+  automation classes are empty; the Portal deployment and Helm release and
+  exact three execution-image objects are absent.
+- The existing AAP gateway and OpenShift remain available. Demo organization,
+  namespace shells, Portal PVCs and Secrets remain. Local keys/passwords and
+  reusable identity shells were not deleted.
+- Lifecycle regression tests and production-profile Ansible/YAML lint pass.
+  Regression coverage includes verified credential type/image declarations,
+  already empty classes and the exact safe-delete request contract.
+- The demo is now offline. No post-teardown recreation, browser acceptance of
+  a recreated installation, or deletion of retained identity/storage is claimed.
 
 Do not start the next phase until the previous phase works.
 

@@ -26,3 +26,10 @@
   loop: "{{ lifecycle_aap_objects.json.results }}"
   loop_control:
     label: "{{ item.name }}"
+
+- name: Retain only verified object metadata for bounded removal
+  ansible.builtin.set_fact:
+    lifecycle_verified_objects: >-
+      {{ lifecycle_verified_objects | default({}) |
+         combine({lifecycle_object.endpoint: lifecycle_aap_objects.json.results}) }}
+  no_log: true

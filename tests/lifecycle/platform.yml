@@ -93,6 +93,104 @@
               - >-
                 lookup('ansible.builtin.file', '../../bootstrap/lifecycle-cleanup.yml')
                 is not search('kind: Namespace')
+
+        - name: Require JSON API safe-delete rather than unconditional workspace deletion
+          ansible.builtin.assert:
+            that:
+              - safe_delete_task['ansible.builtin.uri'].method == 'POST'
+              - safe_delete_task['ansible.builtin.uri'].url is search('/actions/safe-delete$')
+              - safe_delete_task['ansible.builtin.uri'].headers['Content-Type'] == 'application/vnd.api+json'
+              - safe_delete_task['ansible.builtin.uri'].status_code == [204]
+              - safe_delete_task.when == 'not lifecycle_profile.terraform.retain_history'
+          vars:
+            teardown_tasks: "{{ (lookup('ansible.builtin.file', '../../bootstrap/teardown.yml') | from_yaml)[0].tasks }}"
+            destroy_block: >-
+              {{ (teardown_tasks | selectattr('name', 'equalto', 'Destroy only approved demo resources in dependency order') | first).block }}
+            safe_delete_task: >-
+              {{ destroy_block | selectattr('name', 'equalto', 'Safely delete empty workspaces only when history retention is explicitly disabled') | first }}
+
+        - name: Allocate a distinct production removal declaration fixture
+          ansible.builtin.tempfile:
+            state: file
+            suffix: -lifecycle-declarations.yml
+          register: lifecycle_declaration_fixture
+
+        - name: Test actual removal declarations without invoking the dispatcher
+          block:
+            - name: Select production declaration tasks
+              ansible.builtin.copy:
+                dest: "{{ lifecycle_declaration_fixture.path }}"
+                content: >-
+                  {{ lookup('ansible.builtin.file', '../../bootstrap/lifecycle/remove-objects.yml') | from_yaml
+                     | rejectattr('name', 'equalto', 'Reconcile only this verified object class through the supported dispatcher')
+                     | list | to_nice_yaml }}
+                mode: "0600"
+
+            - name: Model a verified credential and a missing allowlisted credential
+              ansible.builtin.set_fact:
+                demo_lifecycle_org_name: Demo | Datacentre Failover
+                lifecycle_object:
+                  endpoint: credentials
+                  variable: controller_credentials
+                  names: [Demo | Existing, Demo | Missing]
+                lifecycle_verified_objects:
+                  credentials:
+                    - {name: Demo | Existing, credential_type: 42}
+
+            - name: Execute actual bounded absent declarations
+              ansible.builtin.include_tasks: "{{ lifecycle_declaration_fixture.path }}"
+
+            - name: Require the installed module credential type and only verified objects
+              ansible.builtin.assert:
+                that:
+                  - controller_credentials == expected_credentials
+              vars:
+                expected_credentials:
+                  - name: Demo | Existing
+                    organization: Demo | Datacentre Failover
+                    state: absent
+                    credential_type: 42
+
+            - name: Model an already empty credential class
+              ansible.builtin.set_fact:
+                lifecycle_verified_objects:
+                  credentials: []
+
+            - name: Execute actual idempotent empty-class declarations
+              ansible.builtin.include_tasks: "{{ lifecycle_declaration_fixture.path }}"
+
+            - name: Require no deletion requests for missing credentials
+              ansible.builtin.assert:
+                that:
+                  - controller_credentials == []
+
+            - name: Model a verified execution environment with its required image
+              ansible.builtin.set_fact:
+                lifecycle_object:
+                  endpoint: execution_environments
+                  variable: controller_execution_environments
+                lifecycle_verified_objects:
+                  execution_environments:
+                    - {name: Demo | EE, image: quay.io/example/verified:existing}
+
+            - name: Execute actual execution-environment absent declarations
+              ansible.builtin.include_tasks: "{{ lifecycle_declaration_fixture.path }}"
+
+            - name: Require the installed role image field without unrelated fields
+              ansible.builtin.assert:
+                that:
+                  - controller_execution_environments == expected_environments
+              vars:
+                expected_environments:
+                  - name: Demo | EE
+                    organization: Demo | Datacentre Failover
+                    state: absent
+                    image: quay.io/example/verified:existing
+          always:
+            - name: Remove only the allocated declaration fixture
+              ansible.builtin.file:
+                path: "{{ lifecycle_declaration_fixture.path }}"
+                state: absent
       always:
         - name: Remove only the allocated platform assertion fixture
           ansible.builtin.file:
