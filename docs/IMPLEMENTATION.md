@@ -48,7 +48,7 @@ with the deployed Phase 1 state; they are not customer-facing branding.
 
 ---
 
-## Platform assumptions
+### Platform assumptions
 
 This project is designed primarily for the Red Hat Demo Platform (RHDP) Ansible Product Demos environment.
 
@@ -106,12 +106,11 @@ Reuse an existing execution environment where practical. Create a dedicated demo
 
 ---
 
-
-# 2. Core architectural principle
+## 2. Core architectural principle
 
 The responsibilities must remain separate.
 
-## Terraform
+### Terraform
 
 Terraform owns the infrastructure topology.
 
@@ -126,7 +125,7 @@ Terraform must:
 
 Terraform must **not** perform operational failover.
 
-## Ansible Automation Platform
+### Ansible Automation Platform
 
 AAP owns runtime operations.
 
@@ -142,7 +141,7 @@ AAP must:
 - create execution evidence;
 - later perform recovery.
 
-## Self-Service Automation Portal
+### Self-Service Automation Portal
 
 The portal is the restricted user's front door.
 
@@ -159,7 +158,7 @@ The user must see only the allowed operational service and limited inputs.
 
 ---
 
-# 3. MVP scope
+## 3. MVP scope
 
 Implement exactly:
 
@@ -183,7 +182,7 @@ Design cleanly enough that these can be added later.
 
 ---
 
-# 4. User-visible scenario
+## 4. User-visible scenario
 
 The user browses to one URL representing the application.
 
@@ -215,7 +214,7 @@ The transition must be visually obvious.
 
 ---
 
-# 5. AWS topology
+## 5. AWS topology
 
 Use a small, inexpensive environment.
 
@@ -265,11 +264,11 @@ Expected result:
 
 ---
 
-# 6. Terraform workspace design
+## 6. Terraform workspace design
 
 Use three workspaces.
 
-## `ww-demo-shared`
+### `ww-demo-shared`
 
 Owns shared resources:
 
@@ -279,7 +278,7 @@ Owns shared resources:
 - HAProxy/front-door host;
 - common DNS resources if implemented.
 
-## `ww-demo-dc1`
+### `ww-demo-dc1`
 
 Owns:
 
@@ -288,7 +287,7 @@ Owns:
 - DC1-specific security resources;
 - outputs required by AAP.
 
-## `ww-demo-dc2`
+### `ww-demo-dc2`
 
 Owns:
 
@@ -303,7 +302,7 @@ The design must allow `ww-demo-dc1` to be locked while `ww-demo-dc2` remains usa
 
 ---
 
-# 7. Terraform outputs
+## 7. Terraform outputs
 
 Expose machine-readable outputs.
 
@@ -328,7 +327,7 @@ AAP must consume outputs rather than duplicating infrastructure values in playbo
 
 ---
 
-# 8. Terraform integration
+## 8. Terraform integration
 
 Use the supported API-based AAP/Terraform integration.
 
@@ -351,7 +350,7 @@ through configuration rather than code changes.
 
 ---
 
-# 9. Terraform operational-state integration
+## 9. Terraform operational-state integration
 
 When a datacentre is declared failed, AAP must lock that datacentre's Terraform workspace.
 
@@ -398,13 +397,13 @@ The healthy site's workspace must remain usable.
 
 ---
 
-# 10. Portal user experience
+## 10. Portal user experience
 
 Create a custom Self-Service Automation Portal template.
 
 Name:
 
-# Datacentre Failover
+## Datacentre Failover
 
 Description:
 
@@ -441,7 +440,7 @@ Use the current AAP portal custom-template mechanism using `rhaap:*` actions and
 
 ---
 
-# 11. Access model
+## 11. Access model
 
 Create a restricted demonstration user or role.
 
@@ -468,7 +467,7 @@ Document the RBAC required.
 
 ---
 
-# 12. AAP workflow architecture
+## 12. AAP workflow architecture
 
 Build job templates as reusable stages.
 
@@ -518,7 +517,7 @@ Evidence
 
 ---
 
-# 13. Job template: Validate Request
+## 13. Job template: Validate Request
 
 Playbook:
 
@@ -540,7 +539,7 @@ Return structured facts for subsequent workflow stages.
 
 ---
 
-# 14. Job template: Determine Current State
+## 14. Job template: Determine Current State
 
 Playbook:
 
@@ -578,7 +577,7 @@ failover_state:
 
 ---
 
-# 15. Job template: Validate Target
+## 15. Job template: Validate Target
 
 Playbook:
 
@@ -615,7 +614,7 @@ If validation fails, the workflow must stop before modifying source traffic.
 
 ---
 
-# 16. Job template: Quarantine Source
+## 16. Job template: Quarantine Source
 
 Playbook:
 
@@ -640,7 +639,7 @@ If workspace is locked for an unrelated reason, fail safely and report the condi
 
 ---
 
-# 17. Job template: Drain Source
+## 17. Job template: Drain Source
 
 Playbook:
 
@@ -648,7 +647,7 @@ Playbook:
 
 Support two modes.
 
-## Planned mode
+### Planned mode
 
 If source is reachable:
 
@@ -661,7 +660,7 @@ If source is reachable:
 
 Do not terminate active connections immediately unless timeout policy permits.
 
-## Failure mode
+### Failure mode
 
 If source is unreachable or demonstrably failed:
 
@@ -684,7 +683,7 @@ Drain complete
 
 ---
 
-# 18. Job template: Activate Target
+## 18. Job template: Activate Target
 
 Playbook:
 
@@ -703,7 +702,7 @@ Avoid unnecessary HAProxy process restart if runtime API/socket operations can p
 
 ---
 
-# 19. Job template: Validate Service
+## 19. Job template: Validate Service
 
 Playbook:
 
@@ -741,11 +740,11 @@ validation:
 
 ---
 
-# 20. Rollback behaviour
+## 20. Rollback behaviour
 
 Rollback must distinguish between a planned failover and an actual failed source.
 
-## Planned failover
+### Planned failover
 
 If target activation fails and source remains healthy:
 
@@ -755,7 +754,7 @@ If target activation fails and source remains healthy:
 - validate source;
 - record rollback.
 
-## Real source failure
+### Real source failure
 
 If source is unavailable and target activation fails:
 
@@ -776,7 +775,7 @@ Keep the failed source Terraform workspace locked.
 
 ---
 
-# 21. Evidence stage
+## 21. Evidence stage
 
 Playbook:
 
@@ -835,7 +834,7 @@ Do not store secrets.
 
 ---
 
-# 22. Recovery workflow
+## 22. Recovery workflow
 
 Create a second workflow:
 
@@ -843,7 +842,7 @@ Create a second workflow:
 
 Portal template:
 
-# Recover Datacentre
+## Recover Datacentre
 
 Inputs:
 
@@ -889,7 +888,7 @@ It should return it to standby/available status.
 
 ---
 
-# 23. Failure simulation
+## 23. Failure simulation
 
 The demo must provide a safe way for an administrator to simulate DC1 failure.
 
@@ -915,7 +914,7 @@ These must not be visible to the restricted portal user.
 
 ---
 
-# Self-Service Automation Portal deployment on RHDP OpenShift
+## Self-Service Automation Portal deployment on RHDP OpenShift
 
 The RHDP Ansible Product Demos environment provides the base AAP and OpenShift environment. This repository treats Self-Service Automation Portal as an add-on workload deployed into that existing OpenShift cluster when required.
 
@@ -935,7 +934,7 @@ RHDP catalog item
                     +--> Demo failover/recovery templates
 ```
 
-## Portal bootstrap behaviour
+### Portal bootstrap behaviour
 
 Before deployment:
 
@@ -953,7 +952,7 @@ Do not create a separate OpenShift cluster.
 
 Do not deploy a separate RHEL Portal appliance in the RHDP path.
 
-## Portal deployment resources
+### Portal deployment resources
 
 Prefer a dedicated namespace/project for demo-owned Portal resources when supported, for example:
 
@@ -970,7 +969,7 @@ demo.redhat.com/project=ww-demo-failover
 
 Do not alter unrelated cluster-scoped objects unless the supported Red Hat Portal installer requires them.
 
-## Portal deployment automation
+### Portal deployment automation
 
 Add:
 
@@ -1000,7 +999,7 @@ Do not invent:
 - Secrets;
 - Operator APIs.
 
-## Portal/AAP connection
+### Portal/AAP connection
 
 Portal must connect to the existing AAP 2.7 instance.
 
@@ -1013,7 +1012,7 @@ The restricted customer-facing Portal user must only see the approved demo servi
 - `Datacentre Failover`
 - `Recover Datacentre`
 
-## Portal verification
+### Portal verification
 
 Bootstrap must fail clearly if Portal cannot be made healthy.
 
@@ -1028,7 +1027,7 @@ Minimum verification:
 
 ---
 
-# AAP configuration-as-code pattern
+## AAP configuration-as-code pattern
 
 Follow the configuration-as-code pattern used by the Red Hat `ansible/product-demos` repository:
 
@@ -1183,7 +1182,7 @@ The project assumes AAP 2.7 and OpenShift are already installed by RHDP. Do not 
 
 ---
 
-# 24. Bootstrap
+## 24. Bootstrap
 
 The repository must be portable.
 
@@ -1221,13 +1220,13 @@ and lifecycle decisions stay in Ansible.
 
 ---
 
-# 25. Bootstrap responsibilities
+## 25. Bootstrap responsibilities
 
 The bootstrap must idempotently configure demo-specific content in the existing AAP 2.7 instance.
 
 It must not install or upgrade AAP or OpenShift. It may deploy/configure Self-Service Automation Portal on the existing OpenShift cluster.
 
-## AAP
+### AAP
 
 - organisation;
 - project;
@@ -1242,7 +1241,7 @@ It must not install or upgrade AAP or OpenShift. It may deploy/configure Self-Se
 - restricted demo user/team configuration;
 - portal-related resources where API/configuration allows.
 
-## HCP Terraform
+### HCP Terraform
 
 - identify organisation;
 - create or identify project;
@@ -1253,7 +1252,7 @@ It must not install or upgrade AAP or OpenShift. It may deploy/configure Self-Se
 - perform initial runs;
 - expose outputs.
 
-## AWS
+### AWS
 
 Terraform performs AWS provisioning.
 
@@ -1261,7 +1260,7 @@ The bootstrap should not manually create AWS resources.
 
 ---
 
-# 26. Bootstrap profile
+## 26. Bootstrap profile
 
 Example:
 
@@ -1302,7 +1301,7 @@ Support AWS temporary credentials when supplied.
 
 ---
 
-# 27. Repository structure
+## 27. Repository structure
 
 Create:
 
@@ -1400,7 +1399,7 @@ Create:
 
 ---
 
-# 28. Ansible coding standards
+## 28. Ansible coding standards
 
 All playbooks and roles must:
 
@@ -1421,7 +1420,7 @@ Do not hide errors simply to make the demo appear successful.
 
 ---
 
-# 29. Terraform coding standards
+## 29. Terraform coding standards
 
 Terraform must:
 
@@ -1448,7 +1447,7 @@ tags = {
 
 ---
 
-# 30. Safe teardown
+## 30. Safe teardown
 
 Teardown is mandatory.
 
@@ -1503,20 +1502,20 @@ administrative mutations concurrently with lifecycle actions.
 
 ---
 
-# 31. Testing
+## 31. Testing
 
 Implement automated tests.
 
 Minimum:
 
-## Static
+### Static
 
 - YAML syntax
 - ansible-lint
 - terraform fmt
 - terraform validate
 
-## Integration
+### Integration
 
 Test:
 
@@ -1528,7 +1527,7 @@ Test:
 - application health response parsing;
 - HAProxy state changes.
 
-## Smoke test
+### Smoke test
 
 After deployment:
 
@@ -1545,7 +1544,7 @@ After deployment:
 
 ---
 
-# 32. GitHub Actions
+## 32. GitHub Actions
 
 Create CI workflow.
 
@@ -1565,7 +1564,7 @@ Any live integration workflow must require explicit manual dispatch and secrets.
 
 ---
 
-# 33. Documentation
+## 33. Documentation
 
 README must contain:
 
@@ -1602,7 +1601,7 @@ Example:
 
 ---
 
-# 34. Security constraints
+## 34. Security constraints
 
 Do not:
 
@@ -1618,7 +1617,7 @@ All portal parameters must be validated against allow-lists.
 
 ---
 
-# 35. UX requirements
+## 35. UX requirements
 
 This is a demo.
 
@@ -1640,11 +1639,11 @@ Keep detailed diagnostic output available but not dominant.
 
 ---
 
-# 36. Acceptance criteria
+## 36. Acceptance criteria
 
 The implementation is complete when the following scenario works end to end.
 
-## Provision
+### Provision
 
 From a clean environment:
 
@@ -1665,7 +1664,7 @@ Results in:
 - recovery workflow configured;
 - self-service templates available.
 
-## Failover
+### Failover
 
 With a restricted user:
 
@@ -1691,7 +1690,7 @@ TFE must visibly show DC1 locked.
 
 DC2 workspace must remain usable.
 
-## Recovery
+### Recovery
 
 After restoring DC1:
 
@@ -1711,7 +1710,7 @@ AAP must:
 
 ---
 
-# 37. Explicit non-goals for v0.1
+## 37. Explicit non-goals for v0.1
 
 Do not implement:
 
@@ -1734,11 +1733,11 @@ The demonstration is about the **operating model**, not recreating an enterprise
 
 ---
 
-# 38. Implementation order
+## 38. Implementation order
 
 Implement in this exact order.
 
-## Phase 1
+### Phase 1
 
 For manual Phase 1 provisioning, the Terraform CLI wrapper may use the HCP
 Terraform API to create a missing demo workspace before initialization. New
@@ -1764,7 +1763,7 @@ nodes after switching back. The browser page displayed a healthy DC1 service.
 Post-deployment plans for all three roots reported no changes. Phase 2 is the
 next implementation step after Phase 1; its completed validation is recorded below.
 
-## Phase 2
+### Phase 2
 
 Ansible runtime roles:
 
@@ -1801,7 +1800,7 @@ regressions pass. Phase 3 completion and workspace quarantine evidence are
 recorded below. Failure simulation on the live AWS nodes, AAP objects, and
 Portal configuration remain later-phase work.
 
-## Phase 3
+### Phase 3
 
 TFE integration:
 
@@ -1865,7 +1864,7 @@ scan is claimed.
 Phase 4 (AAP objects and workflow graph) is next. No AAP or Portal configuration
 has been implemented or changed in Phase 3.
 
-## Phase 4
+### Phase 4
 
 AAP objects:
 
@@ -1961,7 +1960,7 @@ Snyk scan is claimed.
 Phase 4 is complete. Phase 5 (Portal on the existing OpenShift cluster) is
 being implemented and is not yet accepted as complete.
 
-## Phase 5
+### Phase 5
 
 Portal on RHDP OpenShift:
 
@@ -2069,7 +2068,7 @@ Phase 5 live acceptance is complete on the supplied RHDP lab:
   passed. Neither AAP nor OpenShift was installed or upgraded; incident recovery
   did not change platform settings.
 
-## Phase 6
+### Phase 6
 
 Bootstrap and teardown.
 
@@ -2122,11 +2121,11 @@ Phase 6 non-destructive validation passed on the supplied lab:
   acceptance was explicitly unverified at this initial Phase 6 snapshot.
   See the subsequent authorized teardown acceptance below.
 
-## Phase 7
+### Phase 7
 
 Automated testing and CI.
 
-### Testing strategy
+#### Testing strategy
 
 - App type: infrastructure/operational automation, a standard-library HTML
   application and the existing Portal SPA. Reuse existing unittest/Ansible/API,
@@ -2158,7 +2157,7 @@ Automated testing and CI.
   Local HTML tests have no authentication/persistence store; auth and catalog
   persistence are verified against the actual Portal instead.
 
-### CI and live boundaries
+#### CI and live boundaries
 
 - Existing PR/push lint/fmt/validate and fixtures remain; pytest, local Chromium
   and live-helper contracts are added without giving PR jobs secrets.
@@ -2228,7 +2227,7 @@ Phase 7 live acceptance is complete:
   acceptance used the same committed smoke locally against the real lab.
   Phase 8 has not started.
 
-## Phase 8
+### Phase 8
 
 Demo polish.
 
@@ -2280,7 +2279,7 @@ Phase 8 validation:
   phases. Destructive lifecycle testing was a separately authorized outstanding
   acceptance boundary at this Phase 8 snapshot.
 
-## Subsequent authorized teardown acceptance
+### Subsequent authorized teardown acceptance
 
 After all eight phases, the user explicitly selected destruction of demo
 resources and safe deletion of emptied HCP workspaces while retaining reusable
@@ -2317,7 +2316,7 @@ Do not start the next phase until the previous phase works.
 
 ---
 
-# 39. Development rule
+## 39. Development rule
 
 When implementation choices are unclear:
 
@@ -2331,7 +2330,7 @@ When implementation choices are unclear:
 
 ---
 
-# 40. First task
+## 40. First task
 
 Start by creating:
 

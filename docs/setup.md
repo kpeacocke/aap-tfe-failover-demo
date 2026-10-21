@@ -34,7 +34,7 @@ silently adopted or overwritten.
 ### Local tools
 
 | Tool | Requirement |
-|---|---|
+| --- | --- |
 | Python | 3.12-3.14 for lifecycle; set `BOOTSTRAP_PYTHON` if needed |
 | Terraform CLI | 1.9.x for guarded lifecycle; CI pins 1.9.8 |
 | Docker | Installed **and daemon running**; Docker Desktop on macOS is suitable |
@@ -78,7 +78,7 @@ file supplied by an untrusted party. Never print or attach this file to an issue
 Use [.env.example](../.env.example) as the complete field reference:
 
 | Group | Values and checks |
-|---|---|
+| --- | --- |
 | HCP | `HCP_TERRAFORM_ORGANIZATION`, `TF_TOKEN_app_terraform_io`; set `TF_VAR_terraform_organization` to the same organization |
 | AWS identity | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, optional `AWS_SESSION_TOKEN`; pin `TF_VAR_aws_account_id` |
 | AWS region | `TF_VAR_aws_region`; obtain it from the lab's AWS workload provisioning details, not its sign-in URL |
@@ -118,7 +118,7 @@ The delivered configuration currently fetches this public upstream repository.
 It is not automatically fork-aware:
 
 | Surface | Configuration |
-|---|---|
+| --- | --- |
 | AAP project | [aap-bootstrap-vars.yml](../bootstrap/aap-bootstrap-vars.yml) |
 | OpenShift execution-image build | [build-ee.yml](../bootstrap/build-ee.yml) |
 | Portal catalog | [portal/vars.yml](../bootstrap/portal/vars.yml) |
