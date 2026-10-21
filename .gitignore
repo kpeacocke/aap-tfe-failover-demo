@@ -1,10 +1,23 @@
+# Local operating-system and editor artifacts
 .DS_Store
+._*
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+
+# Private environment configuration and reusable local credentials/reports
 .env
 .env.*
 !.env.example
+!.env.*.example
 .local/
+
+# Terraform working directories, state, saved plans and private inputs
+# Keep .terraform.lock.hcl and *.example files versioned.
 .terraform/
-**/.terraform/*
 *.tfstate
 *.tfstate.*
 *.tfplan
@@ -12,14 +25,45 @@
 crash.log
 crash.*.log
 terraform/**/backend.hcl
-terraform/**/terraform.tfvars
-terraform/**/terraform.tfvars.json
+*.tfvars
+*.tfvars.json
+.terraformrc
+terraform.rc
+*.tfrc
+*.tfrc.json
+
+# Private key files; public keys are not excluded by these rules
 *.pem
 *.key
+id_rsa
+id_ecdsa
+id_ed25519
+
+# Python environments, bytecode, test/lint caches and coverage
 .venv/
+venv/
+env/
 __pycache__/
 .pytest_cache/
 *.py[cod]
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Ansible retry files
+*.retry
+
+# Node dependencies, coverage and browser-generated output
 node_modules/
-tests/portal-browser/test-results/
-tests/portal-browser/playwright-report/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+test-results/
+playwright-report/
+**/playwright/.cache/
+**/playwright/.auth/

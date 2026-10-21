@@ -5,7 +5,7 @@
 ## What the evidence proves
 
 | Layer | Coverage | Does not prove |
-|---|---|---|
+| --- | --- | --- |
 | Static | Terraform formatting/validation, ShellCheck, Ansible/YAML lint | Live account permissions or platform compatibility |
 | Local application | Python tests and real Chromium-rendered pages | Portal authentication or AWS networking |
 | API/runtime fixtures | Real collections, TLS API fixtures, HAProxy/application processes, workflow stages and lifecycle guards | Actual HCP/AWS/AAP service availability |
@@ -55,7 +55,7 @@ The complete fixture/lint sequence and dependencies are kept in CI rather than
 duplicated as a second divergent build system. Important test entrypoints:
 
 | Entrypoint | Coverage / prerequisites |
-|---|---|
+| --- | --- |
 | `tests/test-terraform-env.sh`, `test-ssh-key.sh`, `test-workspace.sh`, `test-runtime-env.sh` | Wrapper configuration and refusal paths; disposable fixtures |
 | `tests/test-aap-config.sh` then `tests/test-portal-config.sh` | Build local EE and verify declarative configuration/templates; Docker |
 | `tests/test-lifecycle.sh` | Saved-plan/ownership/quarantine and platform-removal contracts; Ansible dependencies |
@@ -75,7 +75,7 @@ Sanitize any report before committing it. Do not include tokens, full state,
 private keys, Secret payloads or authentication URLs.
 
 | Gate | Required evidence |
-|---|---|
+| --- | --- |
 | Source and prerequisites | Published revision available to AAP/image/catalog; supported existing platforms and entitlements; dedicated workspace organization |
 | Deployment | Guarded bootstrap successful; exact owned infrastructure/content; verified HAProxy SSH trust and AAP execution `/32` |
 | Readiness | `bash scripts/demo-status.sh` exits 0 / READY; record actual active direction |
@@ -105,7 +105,7 @@ bash tests/test-portal-browser.sh access.spec.mjs catalog.spec.mjs
 Two independent opt-in scenarios exist. **Do not enable/run them together.**
 
 | Opt-in | Real effect |
-|---|---|
+| --- | --- |
 | `DEMO_PORTAL_LIVE_OPERATIONS=true bash tests/test-portal-browser.sh` | Four-operation planned switch/recover/switchback/recover suite; requires clean DC1 baseline; ends on DC1 |
 | `DEMO_LIVE_FAILURE_SMOKE=true bash tests/test-portal-browser.sh failure-smoke.spec.mjs` | Stops the exact two DC1 instances, verifies 503, fails over through Portal, starts DC1, recovers standby; ends on DC2 |
 
@@ -126,7 +126,7 @@ does not serialize outside administrators or Portal users.
 Environment variables:
 
 | Variable | Scope |
-|---|---|
+| --- | --- |
 | `DEMO_PORTAL_URL`, `AAP_HOSTNAME` | Both scopes; verified HTTPS base URLs |
 | `HAPROXY_PUBLIC_IP`, `HCP_TERRAFORM_ORGANIZATION` | Failure smoke |
 | `AWS_ACCOUNT_ID`, `AWS_REGION` | Failure smoke; explicit expected identity |

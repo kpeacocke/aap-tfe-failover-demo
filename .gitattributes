@@ -1,1 +1,37 @@
+# Normalize text on every platform; deployment scripts require LF on Linux.
 * text=auto eol=lf
+
+# Explicit text handling for source, configuration, templates and lockfiles.
+*.sh text eol=lf
+*.py text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.tf text eol=lf
+*.hcl text eol=lf
+*.tftpl text eol=lf
+*.j2 text eol=lf
+*.cfg text eol=lf
+*.csv text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.example text eol=lf
+Containerfile text eol=lf
+Dockerfile text eol=lf
+LICENSE text eol=lf
+tests/lifecycle/terraform text eol=lf
+
+# Never normalize or produce text diffs for binary deliverables.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.xz binary
+*.7z binary

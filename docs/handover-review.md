@@ -45,7 +45,7 @@ constraint or planned improvement. These are delivery priorities, not
 vulnerability severity ratings.
 
 | Priority | Finding / evidence | Disposition |
-|---|---|---|
+| --- | --- | --- |
 | P1 | No repository license; GitHub license metadata was empty | **Addressed:** owner authorized [MIT](../LICENSE) for first-party content; third-party entitlements remain separate |
 | P1 | README was a development transcript with old account/state examples and competing setup/cleanup paths | **Addressed:** concise [README](../README.md) with dedicated [setup](setup.md), [operations](operations.md) and [validation](validation.md) |
 | P1 | [Architecture](architecture.md) and [presenter runbook](demo-runbook.md) still called teardown unverified after it passed | **Addressed:** teardown evidence corrected; recreation still explicitly unverified |

@@ -60,7 +60,7 @@ capacity. Allow additional time for login, narration and interruptions.
    lab's IPs, routes, workflow IDs or OAuth authorization URL:
 
    | Tab | Presenter purpose |
-   |---|---|
+   | --- | --- |
    | Application | Active site, serving node and health |
    | Portal catalog / failover form | Restricted user's approved operation |
    | Portal recovery form | Original-reference standby recovery |
@@ -92,7 +92,7 @@ capacity. Allow additional time for login, narration and interruptions.
 Either clean baseline is healthy. Do not reset just to match an old run sheet.
 
 | Active service before demo | Planned target | Recover afterward | Final active service |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | DC1 | `dc2` | `dc1` | DC2 |
 | DC2 | `dc1` | `dc2` | DC1 |
 
@@ -117,7 +117,7 @@ failure scenario.
 In **Datacentre Failover**:
 
 | Field | Input |
-|---|---|
+| --- | --- |
 | Target datacentre | The standby site from the direction table |
 | Reason | `Planned maintenance` |
 | Incident/change reference | Your new recorded reference |
@@ -159,7 +159,7 @@ successfully.
 In **Recover Datacentre**:
 
 | Field | Input |
-|---|---|
+| --- | --- |
 | Recovered datacentre | The old source site |
 | Original incident/change reference | Exactly the same failover reference |
 | Confirm recovered standby release | `CONFIRM` |
@@ -240,7 +240,7 @@ during the demo; this project does not promise durable multi-region routing.
 ## Safe fallbacks and troubleshooting
 
 | Symptom | Presenter action / administrator boundary |
-|---|---|
+| --- | --- |
 | Status NOT READY or errors before report | Open its private diagnostics offscreen. Fix credentials/expiry/network/trust or inspect real guards. Never bypass a failure to present green status. |
 | Portal reuses wrong identity | Use a separate browser profile and the fresh catalog URL, not an old OAuth authorization link. |
 | Portal fails but an AAP job may exist | Inspect the current task and AAP graph before resubmitting. A client failure is not proof nothing ran. |
