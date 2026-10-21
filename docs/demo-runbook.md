@@ -1,5 +1,9 @@
 # Presenter runbook: controlled datacentre failover
 
+Prerequisite: complete [setup](setup.md) and acceptance on your own lab. The
+original demonstration environment was torn down; old IPs, job IDs and routes
+are not live customer endpoints.
+
 ## What the audience should learn
 
 > Terraform owns infrastructure lifecycle. AAP owns controlled failover and
@@ -264,12 +268,11 @@ lock or proof the next operation will succeed.
   fresh complete smoke passed. The underlying RHDP failure cause is unconfirmed.
 - Show these job IDs only as **prior evidence**, never label them current.
   Follow new workflow IDs in the current lab.
-- Real destructive teardown/recreation remains **unverified**. Phase 6
-  acceptance covered bootstrap reconciliation and actual destroy-plan preflight
-  only. Use the guarded lifecycle documentation; never claim a fresh destructive
-  round trip was tested.
+- Authorized destructive teardown and safe deletion of all three emptied HCP
+  workspaces subsequently passed. Recreation after that teardown remains
+  **unverified**; never claim a fresh destructive round trip was tested.
 - GitHub manual live dispatch requires environment secrets/reviewer setup; the
   real acceptance above executed the committed test locally.
 
-For full lifecycle instructions see [README](../README.md); for scope and
+For lifecycle instructions see [operations](operations.md); for scope and
 acceptance see [IMPLEMENTATION](IMPLEMENTATION.md).

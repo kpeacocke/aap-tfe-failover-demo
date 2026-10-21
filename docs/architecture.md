@@ -123,8 +123,18 @@ infrastructure mutations must be avoided.
 ## Current limitations
 
 - HAProxy runtime state resets to DC1 on restart or replacement.
+- The public application uses HTTP, and HAProxy is a single point of failure.
+  This is an evaluation topology without production availability or data
+  replication guarantees; it must not host customer data.
 - Staged workflows, Portal and guarded bootstrap reconciliation are
-  live-validated. Actual destructive teardown/recreation is not live-verified.
+  live-validated. Authorized destructive teardown and workspace safe-delete
+  passed; subsequent recreation is not live-verified.
+- Source URLs and the `ww-demo` topology are fixed. Forking or mirroring needs
+  coordinated configuration/test changes, not just a new Git remote. See
+  [setup](setup.md#source-repository-and-revisions).
+- AAP workflow AWS credentials are explicitly injected access keys/session
+  tokens. Local Terraform profile/SSO support does not imply profile/SSO
+  forwarding into AAP.
 - The Phase 1 manual switch helper bypasses Phase 3 quarantine; use the Ansible
   CLI for integrated operations and do not run both concurrently.
 - Enterprise endpoint compatibility is fixture-tested; live acceptance uses
@@ -144,3 +154,6 @@ The snapshot does not authenticate a browser user or reserve the environment.
 OAuth/SPA rendering remains covered by actual Playwright tests. Presenter
 directions, same-reference standby recovery, optional administrator outage and
 interruption handling are documented in [the runbook](demo-runbook.md).
+
+For current customer deployment steps, use [setup](setup.md). Phase numbers
+above identify implementation history, not additional installation stages.

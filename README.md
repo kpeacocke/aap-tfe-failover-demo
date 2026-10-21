@@ -1,863 +1,196 @@
-# AAP Self-Service Datacentre Failover Demo
+# Self-service datacentre failover with AAP and HCP Terraform
 
-This repository demonstrates a small AWS application spanning two datacentres,
-fronted by HAProxy. It includes Terraform provisioning, staged AAP 2.7
-failover/recovery, a restricted Self-Service Automation Portal, guarded
-lifecycle automation and automated validation. The live failure/recovery
-acceptance and authorized destructive teardown are complete. Recreation after
-that teardown remains unverified; the supplied lab demo is now offline.
+[![Demo validation](https://github.com/kpeacocke/aap-tfe-failover-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/kpeacocke/aap-tfe-failover-demo/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-The application is branded "Datacentre Failover Demo" for use with any customer.
-AWS demo tags use `Datacentre-Failover`. Existing `ww-demo-*` identifiers and
-internal paths are retained for deployment/state compatibility; changing them
-is not required to present the generic application.
+**A customer evaluation demo: Terraform provisions the infrastructure, Ansible
+Automation Platform controls failover, and a restricted user initiates the
+operation through Self-Service Automation Portal.**
 
-## Present the demo
+See the traffic move, inspect the staged workflow, and show a real Terraform
+workspace quarantine preventing infrastructure changes against the failed site.
+Recovery validates the restored site and releases its quarantine **without
+automatically moving traffic back**.
 
-Start with the portable [presenter runbook](docs/demo-runbook.md), not a previous
-lab's saved URLs or starting-site assumption. Get current links and a concise
-read-only readiness snapshot:
+> **Evaluation only, not production disaster recovery.** DC1 and DC2 are logical
+> sites in two availability zones of one AWS region. The application is
+> stateless, the public front door uses HTTP, and a single HAProxy instance is a
+> point of failure. Do not use customer data or production credentials.
+> Provisioning creates billable resources.
 
-```bash
-# Set DEMO_PORTAL_URL to your verified HTTPS Portal base URL in private .env.
-bash scripts/demo-status.sh
-```
+## Start here
 
-Requires the existing configured lab, Docker, API credentials and verified SSH
-trust. It discovers the front door through HCP outputs rather than trusting a
-stale `.env` IP. Exit 0 / READY means both sites are healthy, actual active traffic
-and standby isolation passed, workspaces are unlocked, no operation marker or
-active AAP jobs remain, and Portal HTTPS/anonymous denial checks passed. Actual
-OAuth/browser login is a separate check described in the runbook.
+| I want to... | Read |
+|---|---|
+| Understand the design and boundaries | [Architecture](docs/architecture.md) |
+| Deploy into my own RHDP lab | [Setup and prerequisites](docs/setup.md) |
+| Present the controlled failover | [Presenter runbook](docs/demo-runbook.md) |
+| Operate, troubleshoot or tear down | [Operations](docs/operations.md) |
+| Run tests and record customer acceptance | [Validation](docs/validation.md) |
+| Assess handover readiness and remaining gaps | [Handover review](docs/handover-review.md) |
+| Change or contribute to the project | [Contributing](CONTRIBUTING.md) |
+| Inspect detailed requirements and historical evidence | [Implementation record](docs/IMPLEMENTATION.md) |
 
-Normal output contains status and links only. `--details` shows diagnostic
-Ansible output; per-run reports/logs remain private under ignored `.local/status/`.
-Errors or blocked baselines return nonzero; nothing is auto-unlocked, restarted,
-cleaned up or switched. This is not an exclusive-operation reservation.
+## What this demonstrates
 
-Both DC1-active and DC2-active baselines are supported. Last live acceptance
-finished healthy on **DC2**, with DC1 standby. Do not reset solely to match old
-presentation notes.
+- **Restricted self-service:** the operator sees two approved Portal templates,
+  not infrastructure credentials, arbitrary playbooks or administrative controls.
+- **Controlled operations:** separate AAP jobs validate the request and actual
+  state, check the target, quarantine the source, drain, activate, validate and
+  record evidence. Failed operations remain failures even after safe rollback.
+- **Infrastructure ownership:** three HCP Terraform workspaces own shared
+  infrastructure, DC1 and DC2 independently. AAP does not provision replacements
+  during failover.
+- **Incident-owned recovery:** only the original incident can release its demo
+  quarantine, after healthy isolated standby and active service are verified.
+- **Guarded lifecycle:** bootstrap and teardown check identity, ownership,
+  active jobs, workspace locks and operation markers. No force-unlock or silent
+  marker removal is provided.
 
 ## Architecture
-
-- `ww-demo-shared` owns the VPC, internet gateway, HAProxy host, and public
-  address.
-- `ww-demo-dc1` and `ww-demo-dc2` each own one application subnet and two
-  application instances.
-- HAProxy starts with DC1 enabled and DC2 disabled. Its health checks use each
-  application's `/health` endpoint.
-- The demo application has no third-party runtime dependencies. Its home page
-  identifies the active datacentre and serving node.
-- HCP Terraform stores state in three distinct workspaces. DC workspaces read
-  only the shared workspace's network outputs.
-
-See [docs/architecture.md](docs/architecture.md) for the network and
-workspace details.
 
 ```mermaid
 flowchart LR
   User[Restricted operator] --> Portal[Self-Service Automation Portal]
-  subgraph RHDP[Existing RHDP OpenShift / AAP 2.7]
-    Portal --> AAP[Staged AAP failover / recovery]
+  subgraph RHDP[Existing RHDP OpenShift and AAP 2.7]
+    Portal --> AAP[Staged AAP workflows]
   end
-  AAP -->|Validate, quarantine, release| HCP[HCP Terraform workspaces]
-  HCP -->|Infrastructure lifecycle| AWS[AWS network and EC2]
-  AAP -->|Operational traffic change| HA[HAProxy]
+  AAP -->|Read outputs; quarantine and release| HCP[Three HCP Terraform workspaces]
+  Admin[Administrator running Terraform locally] --> HCP
+  Admin -->|Infrastructure lifecycle| AWS[AWS network and EC2]
+  AAP -->|Operational traffic changes| HA[HAProxy]
   Browser[Application browser] --> HA
   HA --> DC1[DC1: two application nodes]
   HA --> DC2[DC2: two application nodes]
+  AWS -.-> HA
+  AWS -.-> DC1
+  AWS -.-> DC2
 ```
 
-## Prerequisites
+RHDP supplies **AAP 2.7 and OpenShift**. This project never installs, upgrades or
+removes them. It deploys/reconciles the Portal add-on on that existing cluster,
+along with demo-owned AAP content and an execution image. It does not create a
+separate Portal appliance.
 
-- Terraform CLI 1.6 or later.
-- An existing HCP Terraform organization at `app.terraform.io`. Initialization
-  creates missing `ww-demo-shared`, `ww-demo-dc1`, and `ww-demo-dc2` workspaces.
-- `curl` and `jq` for workspace discovery/creation during initialization.
-- An HCP Terraform token in `.env` and shared state output access granted to
-  both DC workspaces.
-- AWS credentials available to the local Terraform process, using an AWS CLI
-  profile (including IAM Identity Center/SSO), temporary or long-lived
-  environment credentials, or another supported AWS credential-chain source.
-- The verified AWS region used by the lab's AWS demo workloads.
-- OpenSSH `ssh-keygen` to generate a dedicated demo key, and the presenter's public IPv4
-  CIDR for restricted SSH access to HAProxy.
+| Component | Evaluation baseline |
+|---|---|
+| Terraform service | HCP Terraform Free, `app.terraform.io`, local execution |
+| AWS topology | One explicitly verified account/region; five EC2 instances |
+| Workspaces | `ww-demo-shared`, `ww-demo-dc1`, `ww-demo-dc2` |
+| AAP / OpenShift | Existing AAP 2.7; Portal checks require OpenShift 4.16-4.20 |
+| Portal | Pinned `redhat-rhaap-portal` Helm chart 2.2.11 and Portal 2.2 plug-ins |
+| Local tooling | Python 3.12-3.14, Terraform 1.9.x, Docker, Git, curl, jq, OpenSSH |
 
-These are the infrastructure prerequisites. Subsequent sections cover existing
-AAP authentication, execution-image setup, Portal and lifecycle tooling. RHDP
-supplies AAP 2.7 and OpenShift; this repository never installs or upgrades them.
-The project deploys/reconciles Portal onto that existing OpenShift cluster.
+These are the repository's checked/pinned interfaces, not a promise of support
+for every release in those ranges. Check current Red Hat support and
+entitlements before deploying. The `ww-demo` names remain for state and
+ownership-guard compatibility; they are not customer branding.
 
-## Using your own lab
+## Deployment path
 
-Each presenter clones the repository, creates their own `.env` from
-`.env.example`, and runs `bash scripts/create-ssh-key.sh` to generate their own
-unique SSH key. Neither `.env` nor the `.local/` key directory is included in
-Git. Use your own lab's AWS credentials, account ID, region, public SSH access
-CIDR, and HCP Terraform organization; the current lab values shown below are
-examples, not deployment defaults.
-
-Keep the local key files across teardown and recreation: the helper reuses
-them, and Terraform re-registers the same public key when rebuilding. A fresh
-clone on another machine generates a different key unless you securely restore
-your existing key files.
-
-The workspace names `ww-demo-shared`, `ww-demo-dc1`, and `ww-demo-dc2` are fixed.
-Independent deployments must use separate HCP Terraform organizations rather
-than share those workspaces. Sharing the same three workspaces means managing
-one shared environment; do not apply different presenters' keys to it as though
-they were separate deployments.
-
-## Configure and provision
-
-Copy `.env.example` to `.env` and fill in:
-
-| Setting | Required value |
-| --- | --- |
-| `HCP_TERRAFORM_ORGANIZATION` | Your HCP Terraform organization name. |
-| `TF_TOKEN_app_terraform_io` | HCP Terraform user/team API token with access to the demo workspaces and shared state, plus permission to create missing workspaces in your organization. |
-| `AWS_ACCESS_KEY_ID` | The lab's **AWS Access Key**. |
-| `AWS_SECRET_ACCESS_KEY` | The lab's **AWS Secret Key**. |
-| `AWS_SESSION_TOKEN` | Fill in only if the lab supplies a session token; otherwise leave blank. Leave the legacy `AWS_SECURITY_TOKEN` blank too. |
-| `AWS_PROFILE`, `AWS_DEFAULT_PROFILE` | Leave blank for lab-issued access keys, so an inherited personal profile is not selected. For profile-based authentication instead, set `AWS_PROFILE` and remove the access-key and token lines. |
-| `TF_VAR_aws_account_id` | Optional safety check. Set to the expected 12-digit AWS account ID. Terraform then rejects credentials that resolve to any other account. For the supplied demo lab, use `664418996694`. |
-| `TF_VAR_aws_region` | Required. The region used by the lab's AWS demo workloads (`us-east-2` for the current lab). There is no default. |
-| `SSH_PRIVATE_KEY_PATH` | `.local/ssh/ww-demo`, generated by the helper below. Relative paths resolve from the repository root. |
-| `SSH_PUBLIC_KEY_PATH` | `.local/ssh/ww-demo.pub`; the wrapper passes this public key to Terraform. |
-| `TF_VAR_ssh_key_pair_name` | Optional alternative for an existing EC2 key pair whose matching private key you already hold. Otherwise omit this setting. |
-| `TF_VAR_admin_cidr` | Your public IPv4 address with `/32`, restricting SSH access to HAProxy. |
-| `TF_VAR_terraform_organization` | Same value as `HCP_TERRAFORM_ORGANIZATION`; used by the DC workspaces to read shared outputs. |
-| `HAPROXY_PUBLIC_IP` | Leave empty until provisioning; then set it to the shared workspace's `frontdoor_public_ip` output. |
-
-The lab's **AWS Console URL**, **AWS Console User**, and **AWS Console Password**
-are for browser access only. Do not add them to `.env`; Terraform does not use
-them. Loading `.env` through the project wrappers does not modify your saved
-AWS profiles or credentials files.
-
-The AWS provider deploys to the region explicitly set in `TF_VAR_aws_region`,
-using lab credentials for the intended account. An AWS account sign-in URL and
-access keys do not identify the workload region. Check the completed AAP
-AWS provisioning workflow's `create_vm_aws_region` input, or the RHDP lab
-details. AAP and OpenShift themselves may run somewhere else.
-The wrapper refuses to plan/apply/destroy with an empty or malformed region.
-
-For `TF_VAR_admin_cidr`, use the public IPv4 egress of the terminal that runs
-SSH, followed by `/32`. Check it with
-`curl -4 https://checkip.amazonaws.com` in that terminal. A browser using a VPN
-or privacy relay may report a different address; that address will not allow
-the terminal's SSH connection. Reapply the shared root after changing this
-setting to update the SSH rule.
-
-Profiles, IAM Identity Center/SSO profiles, temporary access keys with session
-tokens, and the standard AWS credential chain are supported. Set
-`TF_VAR_aws_account_id` to pin Terraform to a specific account; when omitted,
-the account restriction is not applied. Do not put AWS root credentials in
-`.env`. Quote values that contain spaces. The file is shell-compatible local
-configuration, is ignored by Git, and should be kept private (`chmod 600
-.env`). Do not commit it or paste tokens into chat.
-
-The Terraform wrapper loads `.env`, generates the ignored backend configuration
-for the selected root, and passes the HCP token through the standard Terraform
-environment variable. On `init`, it queries the named workspace and creates it
-if absent, with local execution and auto-apply disabled. Existing workspaces
-are reused without changing their execution settings or state. API or
-permission errors stop initialization rather than being ignored. No AWS
-resources are created by workspace initialization.
-
-Run provisioning in dependency order:
+Run from a trusted local clone. **Complete the [setup checklist](docs/setup.md)
+before running the mutating command.** You need your own RHDP credentials, HCP
+organization, verified account/region, registry entitlement and SSH trust.
 
 ```bash
+git clone https://github.com/kpeacocke/aap-tfe-failover-demo.git
+cd aap-tfe-failover-demo
 cp .env.example .env
 chmod 600 .env
-# Edit .env before continuing.
-bash scripts/create-ssh-key.sh
-
-./scripts/terraform.sh shared init
-./scripts/terraform.sh shared apply
-
-./scripts/terraform.sh dc1 init
-./scripts/terraform.sh dc1 apply
-
-./scripts/terraform.sh dc2 init
-./scripts/terraform.sh dc2 apply
+# Edit .env privately; configure your own lab, not the previous demo's values.
+# Complete docs/setup.md, including registry consent and SSH trust.
+bash scripts/bootstrap.sh profiles/demo.yml --apply
 ```
 
-The helper generates an unencrypted Ed25519 key at `.local/ssh/ww-demo` with
-private-file permissions. This is a local demo credential: protect the machine
-and directory. It reuses a matching pair on subsequent runs and refuses to
-overwrite incomplete or mismatched files. Terraform creates a prefixed, tagged
-AWS key-pair registration using only the public key; the private key is never
-passed to Terraform or stored in state. Existing AWS keys and your personal
-SSH keys are untouched. Destroy removes the demo AWS registration but retains
-your local key files. If using remote execution, supply the public key as the
-shared workspace's `ssh_public_key` Terraform variable.
+The first run may provision AWS and then **stop at the SSH trust boundary**.
+Verify the new host fingerprint independently, add only the verified key, then
+resume. AAP execution egress also needs its verified `/32` SSH rule; see
+[setup](docs/setup.md#verify-aap-execution-access). No blind key acceptance or
+wide-open SSH workaround is supported.
 
-The DC workspaces need permission to read the shared workspace's state outputs.
-Enable HCP Terraform remote state sharing from `ww-demo-shared` to
-`ww-demo-dc1` and `ww-demo-dc2` before applying them. Keep the workspaces in
-local execution mode for this phase, or configure equivalent AWS credentials
-in each remote-execution workspace.
-
-The shared workspace outputs `frontdoor_url`, `frontdoor_public_ip`, and
-`haproxy_private_ip`. After both DC applies complete, open `frontdoor_url`.
-It should display DC1 as active. The DC workspaces output private health URLs
-and instance IDs for inspection.
-
-Terraform creates the HCP backend configuration in each root's ignored
-`backend.hcl`; you do not need to edit those files manually. The HCP Terraform
-organization must already exist; the workspaces do not need to.
-
-## Prove manual failover
-
-After setting `HAPROXY_PUBLIC_IP` in `.env` to the shared workspace output, the
-manual operator command checks both target `/health` endpoints from HAProxy,
-then switches its runtime server state. It does not change Terraform
-configuration or state. The key path and HAProxy address are read from `.env`:
+After deployment and acceptance, discover current links and readiness:
 
 ```bash
-./scripts/manual-failover.sh dc2
+bash scripts/demo-status.sh
 ```
 
-You can also pass the address and key explicitly:
-`./scripts/manual-failover.sh dc2 203.0.113.10 ~/.ssh/demo-key.pem`.
+Exit 0 / **READY** checks both sites, traffic, standby isolation, HCP locks,
+operation-marker absence, AAP readiness and the Portal HTTPS/anonymous-access
+boundary. It makes no remote changes. It is not an exclusive reservation or a
+substitute for browser/OAuth acceptance.
 
-Refresh the front-door URL and confirm the page reports DC2. Switch back with
-`dc1`. The HAProxy security group restricts SSH to `admin_cidr`; application
-port 8080 is reachable only from HAProxy's security group. The remote switch
-command accepts only `dc1` or `dc2` and leaves the current backend untouched if
-the target health checks fail.
+## Safety and lifecycle
 
-## Phases 2 and 3: Ansible runtime failover and Terraform quarantine
-
-Phase 2 adds reusable `application_health`, `haproxy_state`, and
-`synthetic_validation` roles. Phase 3 adds API-based workspace discovery,
-output retrieval and incident-owned quarantine. Neither phase configures
-AAP/Portal or changes AWS infrastructure.
-
-Use a Python virtual environment (tested with Python 3.12 and 3.14), and
-install the pinned Ansible Core, Python SDK and verified collections.
-`hashicorp.terraform` 2.2.1 is installed from its official Git release tag:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r bootstrap/requirements.txt
-ansible-galaxy collection install -r bootstrap/requirements.yml
-bash scripts/terraform-workspace.sh discover
-bash scripts/runtime-failover.sh dc2 CHG0012345
-# Verify DC1 is recovered and healthy before releasing its quarantine.
-bash scripts/terraform-workspace.sh unlock dc1 CHG0012345
-bash scripts/runtime-failover.sh dc1 CHG0012346
-bash scripts/terraform-workspace.sh unlock dc2 CHG0012346
-```
-
-The wrappers load `.env` and retrieve the existing workspaces and their current
-outputs through the Terraform API, without running Terraform CLI, accessing AWS,
-or downloading full state files. Only allowlisted, non-sensitive topology
-outputs enter the private, temporary inventory. `HAPROXY_PUBLIC_IP` remains
-useful for the Phase 1 helper, but these wrappers use the actual shared output.
-SSH host-key verification
-stays enabled; trust the HAProxy host's verified key before the first run.
-The presenter's machine needs SSH and HTTP access to the front door.
-
-The default endpoint is `https://app.terraform.io`, with
-`HCP_TERRAFORM_ORGANIZATION` and `TF_TOKEN_app_terraform_io`. The token needs
-workspace/current-output read access plus lock and normal-unlock permissions
-for both DC workspaces. Use the original locking identity for release. For an
-existing Terraform Enterprise deployment, operational discovery/lock/unlock
-also accept `TFE_ADDRESS` (HTTPS base URL), `TFE_TOKEN` and optional
-`SSL_CERT_FILE` (trusted CA bundle). TLS verification is always enabled; the HCP
-token is never used as a fallback for a different endpoint. The provisioning
-wrapper remains HCP-only. Enterprise compatibility is tested against a local
-TLS API fixture, not a live Enterprise installation.
-
-The default `planned` mode:
-
-1. Acquires an exclusive marker on HAProxy and discovers the actual active site.
-2. Verifies the backend addresses against Terraform outputs and requires both
-   target nodes' health, datacentre, hostname, and version to match.
-3. Rechecks that the target workspace is unlocked, then locks the source
-   workspace with a stable demo-managed incident/change reason and verifies
-   the authoritative lock state before changing traffic.
-4. Drains source servers, waits for zero active sessions, and places them in
-   maintenance without killing established sessions.
-5. Activates the target through the runtime socket without restarting HAProxy.
-6. Checks every target node, samples eight external health requests, requires
-   both target hosts to serve traffic, checks the application page, and verifies
-   no new source sessions during validation.
-
-Set `TF_VAR_application_version` in `.env` if changing the deployed version
-(default `1.0.0`). `FAILOVER_DRAIN_TIMEOUT_SECONDS` defaults to 60; on timeout,
-the operation aborts and attempts rollback only if both original source nodes
-are still healthy. A successfully rolled-back failover still exits nonzero.
-The aggregate drain deadline is enforced on HAProxy, rather than being extended
-by Ansible/SSH polling round trips. The small Bash socket-polling helper is
-needed because the collection module waits per server, not for an aggregate
-session threshold under one shared deadline.
-If rollback cannot be validated, the CLI fails and requires human escalation.
-Already-active targets, ambiguous runtime states, invalid requests, and
-unready targets are rejected rather than treated as successful switches.
-
-For a demonstrated source outage, use:
-
-```bash
-bash scripts/runtime-failover.sh dc2 INC0012345 failure
-```
-
-`failure` mode refuses to skip draining if either source health endpoint still
-returns HTTP 200. It does not simulate an outage; do not stop live services just
-to try it. Fault injection is covered in the isolated test fixture.
-
-Concurrent runtime and workspace administrative operations are refused. If SSH or Ansible is interrupted,
-the marker `/run/ww-demo-failover.lock` may remain; inspect its `request.json`,
-confirm no operation is still running, and inspect actual HAProxy state before
-an administrator removes it. Do not run the legacy manual helper, Terraform
-apply/destroy, or other runtime socket commands concurrently with this CLI.
-HAProxy restart still resets to Terraform's configured DC1-active default;
-persistent operational state is not implemented in this phase.
-
-Successful runs publish structured results with `ansible.builtin.set_stats`.
-The result includes the verified workspace ID, lock reason, reference and UTC
-verification time.
-
-### Workspace quarantine and release
-
-```bash
-bash scripts/terraform-workspace.sh discover
-bash scripts/terraform-workspace.sh lock dc1 INC0012345
-bash scripts/terraform-workspace.sh unlock dc1 INC0012345
-```
-
-Only `dc1` and `dc2` can be locked/released; the shared workspace is never
-mutated. Repeating a lock with the same reference is safe. An unrelated,
-different-incident or run-owned lock is refused, and no force-unlock is used.
-API conflicts, permissions failures and unconfirmed responses stop the
-operation rather than permitting traffic changes.
-
-Quarantine blocks locking Terraform plan/apply/destroy operations on the source
-workspace while leaving the healthy DC workspace available. Discovery and
-read-only output access remain possible. Do not bypass quarantine with
-`-lock=false`.
-
-Release requires the original reference, both recovered nodes healthy with the
-expected identity/version, the recovered site in HAProxy maintenance, and a
-validated healthy service at the other site. Unlocking neither switches traffic
-nor runs Terraform. This is an administrative Phase 3 building block, not the
-later AAP recovery workflow or an infrastructure repair.
-
-A failed transition retains quarantine even when runtime rollback succeeds.
-An active site cannot be released through this helper; inspect a rolled-back
-or interrupted operation before an administrator decides how to recover. Never
-automatically clear locks after errors. Coordinate with other Terraform users:
-the HAProxy marker serializes these CLIs, not outside administrators, and the
-normal Terraform unlock API has no atomic lock-reason comparison.
-
-## Phase 4: AAP workflows on the existing RHDP platform
-
-Phase 4 adds demo-specific configuration to the **existing AAP 2.7 instance**.
-It never installs or upgrades AAP or OpenShift. Portal remains Phase 5.
-The repository is public, so AAP project checkout needs no GitHub credential.
-
-The configuration follows the `ansible/product-demos` pattern: environment-based
-authentication, a required gateway version check, common bootstrap variables,
-and separate demo variables reconciled by `infra.aap_configuration.dispatch`
-4.10.0. The module fields were checked against the installed collection and the
-certified modules in the existing Product Demos EE.
-
-The RHDP Product Demos image does not contain the SDK versions validated in
-Phase 3. A dedicated, prefixed image extends that existing AAP-compatible image
-with the pinned Python/collection dependencies. OpenShift builds it in
-`ww-demo-execution` and stores it in the existing internal registry. Only that
-image namespace grants AAP service accounts pull access; existing execution
-environments and cluster-wide platform configuration are not replaced.
-The AAP reference uses the resulting immutable image digest.
-
-Phase 4 is live-validated: AAP completed failover and recovery in both
-directions, including recovery launched by the restricted operator. The demo
-finished with DC1 active, all three Terraform workspaces unlocked and no
-Terraform drift. See the [recorded acceptance evidence](docs/IMPLEMENTATION.md#phase-4).
-Portal deployment/configuration remains Phase 5.
-
-### Configure AAP
-
-Set these in the private `.env`:
-
-- `AAP_HOSTNAME`: the RHDP Controller Console URL's HTTPS base URL, without UI
-  paths; plus `AAP_TOKEN` or `AAP_USERNAME` and `AAP_PASSWORD`.
-- `OPENSHIFT_API_URL` and `OPENSHIFT_TOKEN`: access to the existing RHDP cluster
-  for the image build. `AAP_OPENSHIFT_NAMESPACE` defaults to `aap`.
-- Keep TLS verification enabled. For a private OpenShift CA, set
-  `OPENSHIFT_CA_CERT` to a trusted CA file. Set `OPENSHIFT_VALIDATE_CERTS=false`
-  only after explicitly accepting the risk for a disposable lab.
-- Existing Terraform API, AWS account/region, demo SSH key and front-door
-  settings from provisioning. Bootstrap extracts only the previously verified
-  HAProxy entry from your SSH `known_hosts`; it never trusts a fresh key scan.
-
-Docker is required for the local configuration wrapper. It builds a local copy
-of the same EE so certified Ansible collections do not need to be downloaded
-from a separately authenticated Automation Hub. Secret values are passed by
-environment, never committed or written into the execution image.
-
-After publishing this code to the configured Git revision:
-
-```bash
-bash scripts/aap-configure.sh check
-bash scripts/aap-configure.sh inspect
-bash scripts/aap-configure.sh inspect-openshift
-# Builds the current local Git commit; push it before running this command.
-bash scripts/aap-configure.sh build-ee
-# Copy the reported immutable DEMO_EE_IMAGE reference into .env.
-bash scripts/aap-configure.sh install
-bash scripts/aap-configure.sh readiness
-```
-
-Copy the readiness job's verified `TF_VAR_aap_ssh_cidr` `/32` into `.env`, then
-apply **only the shared root** to add that narrowly scoped HAProxy SSH source:
-
-```bash
-bash scripts/terraform.sh shared plan
-bash scripts/terraform.sh shared apply
-```
-
-Your existing presenter SSH rule is preserved. Application nodes still have no
-SSH ingress. Never substitute `0.0.0.0/0` when execution-pod egress is unknown.
-If cluster egress changes, rerun readiness and reconcile the shared root.
-
-`install` establishes common demo resources and then the two workflows.
-`setup` reconciles only the demo stage templates, workflow graphs and
-execute-only grants. A separate administrator-only `Demo | Setup` AAP job runs
-the same demo reconciliation in-platform. Credentials use `update_secrets:
-false`; edit/rotate them deliberately rather than expecting reconciliation to
-overwrite stored secrets. Lab AWS credentials retain their original IAM
-permissions, but these workflows issue only STS identity and EC2 describe
-requests; no AWS mutation or infrastructure provisioning is performed by AAP.
-
-### Run and inspect the AAP graph
-
-AAP exposes **Demo - Datacentre Failover** and **Demo - Datacentre Recovery**.
-The survey accepts only service, datacentre, reason, reference and confirmation
-as appropriate. It does not permit inventory, playbook, credential, branch,
-limit or arbitrary variable overrides.
-
-Failover uses separate jobs for request validation, actual-state discovery,
-target validation (including AWS running state), quarantine, drain, activation,
-service validation and evidence. Failures after traffic mutation enter a
-health-gated recovery decision and then a failing evidence job: even a
-successful traffic rollback does not turn a failed failover into success or
-release quarantine.
-
-Each job invokes one reusable role task set through the common stage
-entrypoint. State is persisted in the owned HAProxy marker, not assumed to
-survive in process-local facts. Each stage verifies workflow ID, reference,
-stage order, source revision and unchanged topology. A cancelled or unreachable
-job can leave a marker: inspect actual state and the owning AAP workflow before
-an administrator removes it. Never remove another workflow's marker.
-
-Recovery checks infrastructure, applications, network/standby isolation and
-Terraform API health/lock ownership before normal unlock, then validates the
-unchanged active service. The Terraform step is a read-only API/output health
-check, not an unlocked plan or an infrastructure repair. Recovery **never
-automatically switches traffic back**.
-
-Administrative CLI equivalents launch the same AAP workflows:
-
-```bash
-bash scripts/aap-configure.sh failover dc2 CHG0012345
-bash scripts/aap-configure.sh recovery dc1 CHG0012345
-bash scripts/aap-configure.sh failover dc1 CHG0012346
-bash scripts/aap-configure.sh recovery dc2 CHG0012346
-```
-
-Each stage has retained job output and non-secret Controller artifacts.
-The final evidence job publishes the machine-readable `demo_workflow_result` artifact,
-including workflow/reference, sites, outcome, drain result, observed lock
-state, validation and timestamps. Use the workflow's graph and child jobs to
-inspect a failure; never clear locks automatically after a CLI timeout.
-Child-job output is for administrators: workflow execution permission does not
-grant the restricted operator access to underlying stage-job details.
-
-### Restricted execution
-
-`ww-demo-operator` belongs to `Demo | Failover Operators`. The team receives
-execute access only to the two workflow templates, not their underlying stage
-jobs, setup/readiness jobs, inventory administration or credentials. Bootstrap
-generates/reuses a password in ignored `.local/aap-operator-password`, unless
-`DEMO_OPERATOR_PASSWORD` is supplied. Keep it private. Portal publication and
-its restricted-user front door are still Phase 5; this phase does not claim
-Portal access or Portal-only authentication has been configured.
-
-## Phase 5: Self-Service Automation Portal
-
-The supported Red Hat Automation Portal Helm chart is pinned to **2.2.11**,
-with Portal 2.2 OCI plug-ins. It supports the existing AAP 2.7 and OpenShift
-4.16-4.20 on x86_64; the supplied platforms are never installed or upgraded.
-Portal deploys in demo-owned `ww-demo-portal`, using the existing ingress and
-storage provisioner. Detection refuses to overwrite an unrelated Portal; the
-demo release is reused/reconciled on repeat runs.
-
-The OCI installer needs `registry.redhat.io` authentication. After explicitly
-approving reuse of the RHDP registry credential, set this in private `.env`:
-
-```bash
-DEMO_PORTAL_REUSE_CLUSTER_REGISTRY_AUTH=true
-```
-
-Bootstrap copies only that registry entry from the existing cluster pull
-secret into the documented demo namespaced OCI Secret. It never displays,
-commits or saves that credential locally, and leaves the original untouched.
-The flag defaults to false. If reuse is not permitted, stop and arrange a
-separate registry credential before deployment.
-
-Publish the code to `main` first, then run:
-
-```bash
-bash scripts/aap-configure.sh portal-check
-bash scripts/aap-configure.sh portal-install
-bash scripts/aap-configure.sh portal-verify
-```
-
-The install creates a demo OAuth client and preserves its secret in OpenShift.
-It saves the one-time OAuth credentials before configuring other AAP objects;
-repeat runs reuse them and the scoped service tokens. If an interrupted run
-saved OAuth credentials but not the catalog token, the next run resumes without
-rotating the client. The existing demo project is synchronized before launcher
-playbooks are configured.
-Portal users sign in with their existing AAP account; no token form or
-administrator credential is exposed. Only **Datacentre Failover** and
-**Recover Datacentre** are registered. Automatic internal-job publication is
-disabled, and the demo operator cannot import templates or administer Portal.
-Use `ww-demo-operator` and the password in ignored `.local/aap-operator-password`
-unless a password was supplied explicitly during AAP setup.
-
-The supported `rhaap:launch-job-template` action cannot launch workflow
-templates directly. Two fixed, surveyed launcher jobs bridge to the existing
-staged workflows using a dedicated execute-only identity. Portal launches the
-bridge with the signed-in user's injected OAuth token. The existing workflow
-graph, guards and quarantine semantics remain the operational implementation;
-no administrator credential is attached to a consumer job.
-A separate read-scoped identity synchronizes only the demo organization.
-
-The printed readiness URL proves workload/Route health, **not** full acceptance.
-Verify operator OAuth login, exactly the two allowed templates, denied
-administration, and real Portal-launched failover/recovery before declaring
-Phase 5 complete. Lifecycle automation and CI are described in the Phase 6/7
-sections below.
-
-### Live Portal browser acceptance
-
-The optional Chromium tests exercise the real Portal SPA and AAP OAuth flow;
-they do not mock AAP or traffic. Install their pinned development-only tools:
-
-```bash
-npm --prefix tests/portal-browser ci
-(cd tests/portal-browser && npx playwright install chromium)
-```
-
-Set `DEMO_PORTAL_URL` to the verified HTTPS URL in private `.env`, then run:
-
-```bash
-bash tests/test-portal-browser.sh
-```
-
-This checks OAuth login, persisted two-template visibility, invalid/anonymous
-authentication, and denied import/administration. The operation test is skipped
-unless explicitly enabled:
-
-```bash
-DEMO_PORTAL_LIVE_OPERATIONS=true bash tests/test-portal-browser.sh
-```
-
-**The enabled operation test changes real traffic.** It requires DC1 initially
-active and both nodes healthy, fails over to DC2, recovers DC1 without changing
-traffic, switches back to DC1 and recovers DC2. Each operation has a unique
-incident reference and verifies both active nodes through the public front door.
-On failure it stops; it never clears quarantine/markers or automatically attempts
-a compensating switch. Inspect the retained Portal task and real AAP graph
-before retrying. Keep the generated operator password file or explicitly supply
-`DEMO_OPERATOR_PASSWORD`. Tests do not save browser authentication state or traces;
-failure screenshots/results remain ignored locally.
-
-If AAP loses an execution worker, do not rerun the full traffic-changing test
-against retained guards. An administrator must first inspect the owning
-workflow and every child job, the marker's `request.json`, actual HAProxy/site
-health, and the incident-owned workspace quarantine. Archive the evidence
-before any approved stale-marker removal; never remove an active workflow's
-marker or force-unlock a workspace. Once safe, submit only the interrupted
-standby's **Recovery** form with its **original** incident reference, retaining
-quarantine until that workflow validates and releases it. Repeat full acceptance
-only after the original incident is completely closed.
-
-Phase 5 acceptance on the supplied RHDP lab is complete: all four browser tests,
-including failover/recovery in both directions, passed. Final state is healthy
-DC1, both sites healthy, no retained marker or workspace quarantine, and three
-no-change Terraform plans. See [the implementation acceptance record](docs/IMPLEMENTATION.md#phase-5)
-for workflow IDs and the safely resolved earlier worker interruption.
-Repeat these checks for each recreated environment.
-
-## Phase 6: bootstrap and guarded teardown
-
-The lifecycle entrypoints orchestrate the existing components; they never
-install or upgrade RHDP AAP/OpenShift. Requirements: Python 3.12-3.14,
-Terraform 1.9.x, a working Docker daemon, Git, curl, jq and OpenSSH tools.
-Set `BOOTSTRAP_PYTHON=python3.14` if your default Python is newer.
-An isolated `.local/lifecycle-venv` is created automatically.
-
-Keep [profiles/demo.yml](profiles/demo.yml) non-secret. It deliberately supports
-the existing `ww-demo` topology, one named HCP project and Portal enabled.
-Endpoints/credentials stay in private `.env`; the explicit
-`TF_VAR_aws_account_id` and verified `TF_VAR_aws_region` are mandatory.
-
-```bash
-# Initial provisioning or explicitly approved infrastructure changes:
-./scripts/bootstrap.sh profiles/demo.yml --apply
-
-# Repeat reconciliation; fails rather than applying infrastructure drift:
-./scripts/bootstrap.sh profiles/demo.yml
-
-# Read-only teardown preflight: inspect jobs/guards/ownership and destroy plans.
-./scripts/teardown.sh profiles/demo.yml
-```
-
-Bootstrap creates missing local-execution workspaces, creates/reuses the HCP
-project, adds the two DC shared-state consumers, provisions shared/DC1/DC2 in
-order, discovers the actual front door/image digest, then reconciles existing
-AAP content and Portal. It reuses local keys, operator password and namespaced
-Portal credentials; `.env` is not rewritten. Local execution uses the normal
-AWS credential chain (including session tokens), not uploaded workspace secrets.
-Reconciliation can still update demo metadata; without `--apply` only AWS
-infrastructure changes and missing HCP resource creation are blocked.
-
-For a fresh/recreated HAProxy host, verify its SSH fingerprint through a trusted
-EC2 console/source and add the verified key to `SSH_KNOWN_HOSTS_PATH` (default
-`~/.ssh/known_hosts`). Bootstrap stops clearly at this trust boundary and can be
-rerun. It never accepts blind `ssh-keyscan` output. Supply the verified AAP
-execution-egress `/32` as described in Phase 4 before expecting remote SSH
-operations to work.
-
-### Destructive teardown requires a separate confirmation
-
-**This takes the demo offline and destroys its AWS infrastructure:**
-
-```bash
-./scripts/teardown.sh profiles/demo.yml --confirm-destroy
-```
-
-It refuses any active AAP job, locked or remote-execution workspace, retained
-operation marker, unrecognized object, or non-demo Terraform resource. It
-never force-unlocks, cancels jobs or automatically releases quarantine.
-After approval it reserves the HAProxy operation marker, applies saved destroy
-plans in **DC1 → DC2 → shared** order, and removes verified demo AAP templates,
-inventory, project, credentials and EE reference through the supported
-dispatcher. Only the pinned demo Helm release and labelled execution-image
-objects are removed; namespaces are never deleted.
-
-Intentionally retained for safe reuse: AAP identity/organization/team shells,
-global credential type, Portal OAuth/identity Secrets and PVCs, namespaces,
-HCP project, and local keys/operator password. HCP workspace history is also
-retained by default. Set `terraform.retain_history: false` in the profile to use
-HCP's safe-delete action on the empty workspaces after successful destruction.
-This is **not** a purge of reusable credentials or storage.
-
-If destruction fails, stop and inspect its saved evidence and marker ownership.
-Do not blindly clear the marker or retry with force unlock. An interrupted
-teardown requires administrator review before explicitly clearing its stale
-marker and resuming. Avoid concurrent out-of-band administrative changes.
-
-Initial Phase 6 live validation was limited, by presenter choice, to bootstrap
-reconciliation and non-destructive teardown preflight. Destructive
-teardown had not yet been run at that acceptance snapshot.
-Those non-destructive checks passed, including repeat credential reuse, all
-three real destroy-plan ownership checks and three restricted-browser tests.
-The existing demo remains healthy on DC1 with all workspaces unlocked.
-That is the Phase 6 acceptance snapshot, not a promise about later presenter
-operations. Inspect actual traffic and quarantine before any new live test.
-
-Subsequent explicit teardown authorization was completed after Phase 8:
-DC1, DC2 and shared AWS infrastructure were destroyed, verified demo AAP
-content and the Portal Helm release were removed, and all three empty HCP
-workspaces were safe-deleted. Independent read-only checks passed for absent
-AWS infrastructure/workspaces/content, retained Portal PVCs/Secrets/namespaces,
-and available existing AAP/OpenShift. Local keys and credentials remain for
-reuse. Recreation has not been attempted.
-
-Live teardown exposed required absent-state fields in the installed
-configuration roles: credential type and execution-environment image now come
-from ownership-verified API records. Safe-delete requests include HCP's required
-JSON:API content type. Production-task regression tests cover these contracts.
-
-```bash
-# Credential-free production-task regression tests:
-bash tests/test-lifecycle.sh
-```
-
-## Phase 7: automated testing and manual live acceptance
-
-Normal pull requests and pushes run credential-free CI only. Existing real
-collection/API fixtures and real HAProxy failure tests are retained. CI now
-also runs the existing application tests through pinned pytest, tests the
-live-check helper contracts, and starts two real application processes for
-Chromium checks of rendered identity, site navigation, reloads and explicit
-404 handling. These local browser checks do **not** claim Portal or AWS E2E
-coverage.
-
-```bash
-python3 -m pip install -r tests/requirements.txt
-python3 -m pytest tests/test_application.py -v
-npm --prefix tests/portal-browser ci
-(cd tests/portal-browser && npx playwright install chromium)
-npm --prefix tests/portal-browser run test:contracts
-npm --prefix tests/portal-browser run test:local
-# Uses the image built by tests/test-aap-config.sh; no cloud credentials:
-bash tests/test-demo-simulation.sh
-```
-
-The [Manual live acceptance workflow](.github/workflows/live.yml) runs only on
-manual dispatch from `main`, serializes its own runs without cancellation and
-uses the GitHub environment **demo-live**. Configure required environment
-reviewers and restrict that environment to `main` in repository settings before
-storing credentials. This does not serialize outside administrators or Portal
-users: reserve an exclusive maintenance window for failure smoke.
-
-Set these **environment variables** in GitHub:
-
-| Variable | Purpose |
+| Command | Effect |
 |---|---|
-| `DEMO_PORTAL_URL` | Verified HTTPS Portal URL |
-| `AAP_HOSTNAME` | Verified HTTPS AAP base URL |
-| `HAPROXY_PUBLIC_IP` | Existing public front door, for failure smoke |
-| `HCP_TERRAFORM_ORGANIZATION` | Existing organization, for failure smoke |
-| `AWS_ACCOUNT_ID`, `AWS_REGION` | Explicit verified account/region, for failure smoke |
+| `bash scripts/bootstrap.sh profiles/demo.yml` | Reconcile demo configuration; refuses infrastructure changes requiring apply. **Not a dry run.** |
+| `bash scripts/bootstrap.sh profiles/demo.yml --apply` | Authorize demo infrastructure creation/changes and platform-content reconciliation. |
+| `bash scripts/teardown.sh profiles/demo.yml` | Non-destructive ownership/activity checks and real saved destroy plans. |
+| `bash scripts/teardown.sh profiles/demo.yml --confirm-destroy` | **Destroy demo AWS resources** and remove bounded AAP/Portal content. |
 
-Set these **environment secrets**, never repository files:
+Teardown retains reusable identities, Secrets, Portal storage, namespaces,
+local keys and the HCP project. Workspace history is retained by default.
+Setting `terraform.retain_history: false` in the non-secret profile selects
+HCP **safe-delete** of emptied workspaces. This is not a credential/storage
+purge. Read [the teardown procedure](docs/operations.md#teardown) first.
 
-- `DEMO_OPERATOR_PASSWORD`: restricted `ww-demo-operator` password.
-- Failure smoke only: `TFE_TOKEN`, an administrative read-capable `AAP_TOKEN`
-  (for the conservative all-active-jobs check), `AWS_ACCESS_KEY_ID`,
-  `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` when using temporary keys.
-  AWS permission must include identity/instance inspection, stopping and starting
-  only the two existing demo DC1 instances. No create/terminate permission is
-  needed. HCP must support output reads; quarantine mutations are performed by
-  the existing AAP workflow credential, not this test helper.
+Do not run infrastructure changes, manual HAProxy helpers, multiple operators
+or live tests concurrently. An interrupted operation can leave quarantine or a
+marker intentionally in place; inspect actual state before any approved
+administrator recovery.
 
-The default **read-only** scope checks actual OAuth login, persisted catalog
-content, denied anonymous/invalid authentication and denied administration.
-It also selects the failure reason without submitting a task. It neither
-launches failover nor starts/stops instances.
+## Validation and known limits
 
-The **failure-smoke** scope additionally requires the exact confirmation
-`STOP DC1`. It requires initially healthy DC1 and all three workspaces unlocked.
-An administrator must first verify both sites healthy, no retained marker,
-no other running work, current application IP and sufficient lab lifetime.
-The test stops the two verified DC1 EC2 instances, verifies HTTP 503, submits
-the real Portal **Site failure** operation, verifies DC2 traffic and exact
-incident-owned DC1 quarantine, starts DC1, then submits recovery with the
-original reference. The workflow validates recovered standby health before
-release; final assertions require DC2 traffic and three unlocked workspaces.
-It intentionally **ends on DC2**, not DC1. Do not enable the independent
-four-operation switchback suite at the same time.
+Credential-free [CI](.github/workflows/ci.yml) checks Terraform, shell/Ansible,
+application/browser behavior, real HAProxy fixtures, API contracts, workflow
+stages and lifecycle guards. [Manual live acceptance](.github/workflows/live.yml)
+is separate and requires lab-specific approvals and secrets.
 
-Administrator-only power-state helpers are also available locally:
+Historical live acceptance includes Portal failover/recovery in both
+directions, a real DC1 outage and standby recovery, read-only readiness, and
+authorized destructive teardown with workspace safe-delete. **The original
+lab is offline. Recreation after teardown has not been live-validated.**
+Repeat [customer acceptance](docs/validation.md#customer-acceptance) in your own
+environment; historical green CI is not proof your lab is ready.
 
-```bash
-DEMO_LIVE_FAILURE_SMOKE=true bash scripts/aap-configure.sh simulate-dc1
-DEMO_LIVE_FAILURE_SMOKE=true bash scripts/aap-configure.sh restore-dc1
-# Complete opt-in smoke; changes real traffic and ends on DC2:
-DEMO_LIVE_FAILURE_SMOKE=true bash tests/test-portal-browser.sh failure-smoke.spec.mjs
-```
+Important limits:
 
-These helpers use exact Terraform-output IDs, an account pin, exact node names,
-project tags, workspace guards and an all-active-AAP-jobs check before EC2
-stop/start. They are not registered as restricted-user AAP/Portal templates.
-Stopping instances is the documented failure-simulation exception to normal
-Terraform lifecycle ownership: it never creates, replaces or terminates them.
-Restore only starts DC1; it does not switch traffic or release quarantine.
-The checks are not a distributed administrative lock.
+- HAProxy restart/replacement resets traffic to its configured DC1 baseline.
+- No application-data replication, multi-region recovery, HA front door,
+  measured production RTO/RPO, or service-level guarantee is included.
+- Workspaces, object allowlists and source URLs are intentionally fixed.
+  Use a separate HCP organization per independent deployment. A fork needs
+  coordinated [source-configuration changes](docs/setup.md#source-repository-and-revisions).
+- Credential rotation is deliberate: existing AAP secrets are not overwritten
+  by routine reconciliation. See [operations](docs/operations.md#credentials-and-retained-material).
+- GitHub branch protection, live-environment reviewers and security features
+  are settings, not installed by cloning this repository. See the
+  [handover checklist](docs/handover-review.md#github-owner-settings).
 
-**On any smoke failure or cancelled job, inspect EC2, the Portal task/AAP graph,
-marker and quarantine before proceeding.** There is deliberately no automatic
-restart, retry, compensating switch, force-unlock or marker removal. Interrupted
-smoke may leave DC1 stopped or quarantined. Do not rerun the whole suite blindly.
-Authentication state, traces and live screenshots are not uploaded as CI
-artifacts; any local screenshots/results remain ignored.
+## Repository map
 
-Phase 7 acceptance is complete: credential-free CI, real read-only Portal
-checks and the explicitly authorized full failure/restore smoke passed. The
-fresh Chromium smoke exited 0 (**1 passed in 20.1 minutes**), with real Site
-failure workflow **371** and original-reference recovery workflow **385**.
-Final state is **DC2 active**, both DC1 nodes healthy standby, all workspaces
-unlocked and no operation marker. Three final Terraform plans show no changes.
+| Path | Purpose |
+|---|---|
+| [terraform/](terraform/) | Shared/DC infrastructure and application-node module |
+| [bootstrap/](bootstrap/) | Declarative AAP/Portal configuration and guarded lifecycle |
+| [playbooks/](playbooks/) / [roles/](roles/) | Runtime failover, recovery and validation |
+| [portal/](portal/) | Two restricted self-service templates |
+| [scripts/](scripts/) | Supported local entrypoints |
+| [tests/](tests/) | Credential-free fixtures and explicit opt-in live tests |
+| [execution-environment/](execution-environment/) | Pinned demo execution image |
+| [docs/](docs/) | Setup, operations, presentation, acceptance and design |
 
-An earlier attempt remains recorded as failed because AAP lost its execution
-worker stream during recovery. With explicit administrator approval and
-terminal-state/health checks, its stale marker was archived and removed; only
-original-reference recovery was retried before the fresh complete test.
-See the [acceptance record](docs/IMPLEMENTATION.md#phase-7). The exact underlying
-RHDP worker interruption cause remains unconfirmed.
+## Support, security and licensing
 
-EC2 stop/start can change automatically assigned application public IPs. Private
-addresses and instance IDs remain stable. After recovery, inspect a Terraform
-refresh-only plan before reconciling changed public-IP outputs; do not apply a
-normal infrastructure-changing plan merely to finish a smoke test.
+This is an evaluation reference, not a supported Red Hat or HashiCorp product.
+Use [support guidance](SUPPORT.md) for sanitized questions and
+[the security policy](SECURITY.md) for private vulnerability reporting.
+Never attach environment files, tokens, Terraform state or private keys.
 
-Destructive teardown was not part of Phase 7 authorization; it was subsequently
-authorized and completed after Phase 8 as recorded above. Recreation remains
-unverified.
-GitHub `demo-live` environment configuration remains an operator prerequisite;
-the real acceptance ran the committed smoke locally, not via Actions dispatch.
-Do not treat mocked helper tests as live failure acceptance. Phase 8 presenter
-readiness and the portable runbook are described at the top of this README.
+First-party repository content is licensed under [MIT](LICENSE).
+Third-party software, container images, collections and Portal components keep
+their own licenses and subscription/entitlement requirements.
 
-## Validate locally
-
-```bash
-terraform fmt -check -recursive terraform
-for root in terraform/shared terraform/dc1 terraform/dc2; do
-  terraform -chdir="$root" init -backend=false
-  terraform -chdir="$root" validate
-done
-python3 -m unittest discover -s tests -v
-bash tests/test-terraform-env.sh
-bash tests/test-ssh-key.sh
-bash tests/test-workspace.sh
-bash tests/test-runtime-env.sh
-ansible-lint playbooks/runtime-failover.yml playbooks/terraform-discover.yml playbooks/terraform-workspace.yml roles tests/terraform_api/operation.yml
-yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap/requirements.yml playbooks roles tests/terraform_api/operation.yml
-shellcheck scripts/*.sh terraform/shared/set-active-datacentre.sh tests/*.sh tests/runtime/*.sh roles/haproxy_state/files/*.sh
-# Requires Docker; disposable local fixture, no .env, cloud credentials or AWS changes.
-bash tests/test-runtime.sh
-bash tests/test-terraform-api.sh
-bash tests/test-aap-config.sh
-bash tests/test-portal-config.sh
-bash tests/test-demo-status.sh
-```
-
-The runtime fixture uses real HAProxy and four copies of the demo application.
-It tests input/readiness/concurrency guards, bidirectional planned switching,
-target failure with validated rollback, unavailable-source escalation,
-successful failure-mode switching, and nonzero-session drain timeout. The
-timeout case uses a TCP-mode fixture to hold an idle session deterministically;
-the other cases use the deployed HTTP-mode configuration.
-It also exercises API-integrated source quarantine, locked-target refusal,
-healthy-standby-only release and retained quarantine after runtime rollback.
-The separate TLS JSON:API fixture tests use the
-real pinned HashiCorp collection and Python SDK to cover authentication,
-output processing/validation, incident ownership, permissions, API conflicts
-and idempotent normal lock/unlock. Neither fixture mounts lab credentials.
-The runtime fixture also executes each AAP stage in a separate Ansible process,
-using protocol-level TLS Terraform/AWS fixtures with real collection modules.
-It checks successful failover/recovery, marker ownership, refusal to skip
-stages and failed-workflow rollback semantics. The configuration test renders
-all stage templates and verifies fixed credentials, restricted surveys and
-execute-only workflow grants without any platform credentials.
-
-The Terraform validation initializes providers but does not contact AWS or
-create infrastructure. Applying the configuration creates billable AWS
-resources. Destroy in reverse dependency order (`dc2`, `dc1`, then `shared`)
-when finished. The wrapper loads `.env` for each command:
-
-```bash
-./scripts/terraform.sh dc2 destroy
-./scripts/terraform.sh dc1 destroy
-./scripts/terraform.sh shared destroy
-```
+[AGENTS.md](AGENTS.md) and [Copilot instructions](.github/copilot-instructions.md)
+are optional contributor guidance. No agent, Copilot subscription or AI
+extension is required to deploy, operate or validate the demo.

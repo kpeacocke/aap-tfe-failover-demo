@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a reproducible, sanitized evaluation-demo issue.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities or leaked credentials, use SECURITY.md and a private
+        reporting channel, not this public form. Never paste .env, tokens, state,
+        private keys, Secret data or customer-identifying logs.
+  - type: input
+    id: revision
+    attributes:
+      label: Repository commit
+      description: Output of git rev-parse HEAD; no lab credentials.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Relevant versions
+      description: Tool versions, AAP/OpenShift versions and operating system. Omit account IDs and lab URLs.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps and failing command
+      description: Include the exit code and whether this is a local fixture or an explicitly approved live operation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected and actual behavior
+      description: Include sanitized diagnostic excerpts only.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safe reporting
+      options:
+        - label: I removed secrets and customer information and am not reporting a vulnerability publicly.
+          required: true

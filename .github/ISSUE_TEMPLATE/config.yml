@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup and support guidance
+    url: https://github.com/kpeacocke/aap-tfe-failover-demo/blob/main/SUPPORT.md
+    about: Read prerequisites, limitations and safe diagnostic guidance first.
+  - name: Private security reporting
+    url: https://github.com/kpeacocke/aap-tfe-failover-demo/blob/main/SECURITY.md
+    about: Never report vulnerabilities or leaked credentials in a public issue.

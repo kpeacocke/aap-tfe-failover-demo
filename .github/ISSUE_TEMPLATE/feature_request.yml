@@ -1,0 +1,32 @@
+name: Change proposal
+description: Propose a focused improvement to the evaluation demo.
+title: "[Proposal]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Customer or operator need
+      description: Describe the outcome, without private customer details.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Proposed scope and alternatives
+      description: Explain the smallest useful change and what should remain unchanged.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance and safety
+      description: How will this be tested? Note cost, live impact, compatibility and ownership/teardown implications.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Project boundary
+      options:
+        - label: I understand this is an evaluation demo and RHDP AAP/OpenShift must not be installed, upgraded or removed.
+          required: true

@@ -1,5 +1,29 @@
 # Project: AAP Self-Service Datacentre Failover Demo
 
+## Customer deliverable and document status
+
+The current deliverable is a customer-neutral, reproducible **evaluation demo
+on a customer-owned RHDP lab**, not a production deployment or managed service.
+All eight implementation phases are complete. The active work is handover
+documentation and repository maintenance, not a new implementation phase.
+
+Start at [README](../README.md), follow [setup](setup.md), then use
+[operations](operations.md), [the presenter runbook](demo-runbook.md) and
+[validation](validation.md). [The handover review](handover-review.md) records
+remaining limitations and owner decisions.
+
+This document remains the architecture/scope/acceptance source of truth.
+Numbered implementation instructions and phase snapshots below describe the
+development sequence; their old lab state, job IDs and future-tense wording are
+historical, not current deployment instructions. The original lab was torn
+down successfully. Recreation after teardown has not been live-validated.
+Customer acceptance must be repeated on the customer's own lab.
+
+Handover scope permits task-oriented documentation, optional concise AI
+guidance, MIT licensing and GitHub collaboration/dependency-review files.
+It does not authorize live provisioning, new runtime capabilities, platform
+upgrades, production-hardening claims or deletion of retained credentials.
+
 ## 1. Objective
 
 Build a complete, portable demonstration showing a restricted user initiating a controlled datacentre failover from the **Red Hat Ansible Automation Platform Self-Service Automation Portal**.
