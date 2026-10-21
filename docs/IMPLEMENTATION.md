@@ -2153,9 +2153,10 @@ Automated testing and CI.
   runs Portal Site failure to DC2, verifies quarantine, starts DC1 and runs
   original-reference standby recovery. It finishes on DC2 with workspaces
   unlocked. It never silently cleans guards or auto-compensates on failure.
-- New live failure smoke and actual destructive Phase 6 teardown/recreation
-  are explicitly unverified. The user approved read-only live validation only
-  for this phase. Do not start Phase 8 or claim those mutations passed.
+- Initial validation was read-only. The user subsequently authorized guarded
+  incident reconciliation, reset and full live failure/recovery acceptance.
+  Actual destructive Phase 6 teardown/recreation remains unverified and outside
+  that authorization.
 
 Phase 7 safe-scope validation:
 
@@ -2171,6 +2172,36 @@ Phase 7 safe-scope validation:
 - Production-profile Ansible lint, YAML, ShellCheck, Terraform formatting and
   all three Terraform validations pass. Snyk Code is not available in the
   tool environment and is not claimed verified.
+
+Phase 7 live acceptance is complete:
+
+- The first real smoke failed when AAP lost its execution-worker event stream
+  during recovery workflow 309. The unlock had reached HCP, and the marker
+  subsequently recorded `recovery_unlock`. That failed test remains recorded
+  as failed; it was not treated as successful acceptance.
+- With explicit approval, verified terminal owner/children, no active AAP
+  jobs, ready platform, healthy nodes and actual unlocked workspaces, the
+  administrator archived and removed only that stale marker. No force-unlock,
+  platform restart or automatic marker stealing was used. Original-reference
+  Portal recovery workflow 322 then passed all nine stages.
+- A fresh guarded reset through workflows 339 and 354 passed. The complete
+  new Chromium failure smoke then exited 0: **1 passed in 20.1 minutes**,
+  reference `smoke-1792551077541`.
+- The production helper stopped only the two verified existing DC1 instances;
+  the browser test observed HTTP 503, launched real Portal Site failure workflow
+  371, verified both DC2 nodes and exact incident-owned DC1 quarantine, restarted
+  DC1 and completed original-reference recovery workflow 385. All eight
+  failover and nine recovery stages succeeded.
+- Final state: healthy DC2 active through both nodes, both DC1 nodes healthy
+  standby, all three workspaces unlocked, no active jobs and no operation
+  marker. Stop/start changed DC1's ephemeral public IPs; an inspected
+  refresh-only Terraform saved plan updated only `application_public_ips`,
+  with no infrastructure actions. All three subsequent normal-locking plans
+  exited 0 with no changes.
+- Full implementation CI passed on `7dcf591`. GitHub environment secret/reviewer
+  setup is still an operator prerequisite for manual Actions dispatch; this
+  acceptance used the same committed smoke locally against the real lab.
+  Phase 8 has not started.
 
 ## Phase 8
 

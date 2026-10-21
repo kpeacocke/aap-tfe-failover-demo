@@ -725,9 +725,28 @@ smoke may leave DC1 stopped or quarantined. Do not rerun the whole suite blindly
 Authentication state, traces and live screenshots are not uploaded as CI
 artifacts; any local screenshots/results remain ignored.
 
-Phase 7 validation is limited to credential-free tests and explicitly approved
-read-only live checks. The new real failure/restore smoke and the Phase 6
-destructive lifecycle remain **unverified** until separately authorized.
+Phase 7 acceptance is complete: credential-free CI, real read-only Portal
+checks and the explicitly authorized full failure/restore smoke passed. The
+fresh Chromium smoke exited 0 (**1 passed in 20.1 minutes**), with real Site
+failure workflow **371** and original-reference recovery workflow **385**.
+Final state is **DC2 active**, both DC1 nodes healthy standby, all workspaces
+unlocked and no operation marker. Three final Terraform plans show no changes.
+
+An earlier attempt remains recorded as failed because AAP lost its execution
+worker stream during recovery. With explicit administrator approval and
+terminal-state/health checks, its stale marker was archived and removed; only
+original-reference recovery was retried before the fresh complete test.
+See the [acceptance record](docs/IMPLEMENTATION.md#phase-7). The exact underlying
+RHDP worker interruption cause remains unconfirmed.
+
+EC2 stop/start can change automatically assigned application public IPs. Private
+addresses and instance IDs remain stable. After recovery, inspect a Terraform
+refresh-only plan before reconciling changed public-IP outputs; do not apply a
+normal infrastructure-changing plan merely to finish a smoke test.
+
+The Phase 6 destructive lifecycle remains **unverified** and was not authorized.
+GitHub `demo-live` environment configuration remains an operator prerequisite;
+the real acceptance ran the committed smoke locally, not via Actions dispatch.
 Do not treat mocked helper tests as live failure acceptance. Phase 8 has not
 started.
 
