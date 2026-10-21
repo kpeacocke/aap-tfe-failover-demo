@@ -1,0 +1,178 @@
+---
+- name: Verify the existing AAP platform without changing it
+  ansible.builtin.import_playbook: check-aap.yml
+
+- name: Allocate a private read-only topology snapshot
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Pin delegated public probes to the local execution container
+      ansible.builtin.add_host:
+        name: localhost
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+    - name: Require report destination and existing verified SSH inputs
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'DEMO_STATUS_REPORT_FILE') == '/run/demo-status/report.txt'
+          - lookup('ansible.builtin.env', 'DEMO_BOOTSTRAP_KEY_FILE') | length > 0
+          - lookup('ansible.builtin.env', 'DEMO_BOOTSTRAP_KNOWN_HOSTS_FILE') | length > 0
+          - lookup('ansible.builtin.env', 'AAP_VALIDATE_CERTS') | default('true', true) | bool
+          - lookup('ansible.builtin.env', 'TFE_ADDRESS') in ['', 'https://app.terraform.io']
+        fail_msg: Use the status wrapper with verified SSH trust, public HTTPS trust and HCP Terraform.
+
+    - name: Allocate temporary credential-free topology
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -demo-status-inventory.json
+      register: demo_status_inventory
+
+    - name: Set existing discovery inputs
+      ansible.builtin.set_fact:
+        terraform_workspace_inventory_path: "{{ demo_status_inventory.path }}"
+        runtime_ssh_private_key_path: "{{ lookup('ansible.builtin.env', 'DEMO_BOOTSTRAP_KEY_FILE') }}"
+
+- name: Reuse validated infrastructure discovery without downloading Terraform state
+  ansible.builtin.import_playbook: ../playbooks/terraform-discover.yml
+
+- name: Inspect presenter endpoints and create the read-only runtime host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - aap-connection-vars.yml
+  tasks:
+    - name: Require an explicit verified Portal HTTPS base URL
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.env', 'DEMO_PORTAL_URL') is match('^https://[A-Za-z0-9.-]+(:[0-9]+)?$')
+        fail_msg: Set DEMO_PORTAL_URL to the verified HTTPS base URL, without a path or trailing slash.
+
+    - name: Inspect active AAP execution without exposing authentication
+      block:
+        - name: Query all active AAP jobs
+          ansible.builtin.uri:
+            url: "{{ aap_hostname }}/api/controller/v2/unified_jobs/?status__in=new,pending,waiting,running&page_size=1"
+            url_username: "{{ aap_username if not aap_token else omit }}"
+            url_password: "{{ aap_password if not aap_token else omit }}"
+            force_basic_auth: "{{ not aap_token }}"
+            headers: "{{ {'Authorization': 'Bearer ' ~ aap_token} if aap_token else {} }}"
+            validate_certs: true
+            follow_redirects: none
+            unredirected_headers: [Authorization]
+            timeout: 20
+          register: demo_status_jobs
+          no_log: true
+      rescue:
+        - name: Explain active-job inspection failure
+          ansible.builtin.fail:
+            msg: Cannot inspect AAP jobs. Check authentication/read permissions and network trust; no jobs were launched.
+
+    - name: Require an authoritative non-negative active-job count
+      ansible.builtin.assert:
+        that:
+          - demo_status_jobs.json.count is integer
+          - demo_status_jobs.json.count >= 0
+        fail_msg: Invalid active-job response. Readiness cannot be determined safely.
+
+    - name: Verify Portal serves its actual HTTPS entrypoint
+      ansible.builtin.uri:
+        url: "{{ lookup('ansible.builtin.env', 'DEMO_PORTAL_URL') }}"
+        return_content: true
+        follow_redirects: none
+        timeout: 20
+      register: demo_status_portal
+      failed_when: >-
+        demo_status_portal.status | default(-1) != 200 or
+        '<html' not in demo_status_portal.content | default('') | lower
+
+    - name: Verify anonymous catalog access is rejected
+      ansible.builtin.uri:
+        url: "{{ lookup('ansible.builtin.env', 'DEMO_PORTAL_URL') }}/api/catalog/entities?filter=kind=template"
+        status_code: 401
+        follow_redirects: none
+        timeout: 20
+
+    - name: Read the validated credential-free topology
+      ansible.builtin.set_fact:
+        demo_status_topology: "{{ (lookup('ansible.builtin.file', demo_status_inventory.path) | from_json).all.children.haproxy.hosts.demo_haproxy }}"
+
+    - name: Add only the discovered HAProxy host with strict existing SSH trust
+      ansible.builtin.add_host:
+        name: demo_haproxy
+        groups: demo_status_hosts
+        ansible_host: "{{ demo_status_topology.ansible_host }}"
+        ansible_user: ec2-user
+        ansible_ssh_private_key_file: "{{ runtime_ssh_private_key_path }}"
+        ansible_ssh_common_args: >-
+          -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile={{ lookup('ansible.builtin.env', 'DEMO_BOOTSTRAP_KNOWN_HOSTS_FILE') }}
+        runtime_sites: "{{ demo_status_topology.runtime_sites }}"
+        runtime_frontdoor_url: "{{ demo_status_topology.runtime_frontdoor_url }}"
+        terraform_workspace_workspaces: "{{ demo_status_topology.terraform_workspace_workspaces }}"
+        demo_status_active_jobs: "{{ demo_status_jobs.json.count }}"
+        demo_status_aap_url: "{{ aap_hostname }}"
+        demo_status_portal_url: "{{ lookup('ansible.builtin.env', 'DEMO_PORTAL_URL') }}"
+        demo_status_organization: "{{ lookup('ansible.builtin.env', 'HCP_TERRAFORM_ORGANIZATION') }}"
+
+    - name: Remove only the temporary local discovery file
+      ansible.builtin.file:
+        path: "{{ demo_status_inventory.path }}"
+        state: absent
+
+- name: Read actual traffic and standby readiness without modifying the runtime
+  hosts: demo_status_hosts
+  become: true
+  gather_facts: false
+  vars:
+    runtime_application_version: "{{ lookup('ansible.builtin.env', 'TF_VAR_application_version') | default('1.0.0', true) }}"
+    runtime_health_retries: 1
+    runtime_health_delay_seconds: 1
+    runtime_validation_samples: 8
+  tasks:
+    - name: Read the exact HAProxy backend using the existing read-only role
+      ansible.builtin.include_role:
+        name: haproxy_state
+
+    - name: Classify the actual active pair without assuming DC1
+      ansible.builtin.set_fact:
+        demo_status_up: "{{ haproxy_state_servers | selectattr('status', 'equalto', 'UP') | map(attribute='svname') | sort }}"
+        demo_status_maint: "{{ haproxy_state_servers | selectattr('status', 'equalto', 'MAINT') | map(attribute='svname') | sort }}"
+
+    - name: Require exactly one healthy active site and one isolated standby site
+      ansible.builtin.assert:
+        that:
+          - >-
+            (demo_status_up == ['dc1_app_01', 'dc1_app_02'] and demo_status_maint == ['dc2_app_01', 'dc2_app_02']) or
+            (demo_status_up == ['dc2_app_01', 'dc2_app_02'] and demo_status_maint == ['dc1_app_01', 'dc1_app_02'])
+        fail_msg: NOT READY - HAProxy has a failed or mixed active/standby state. Inspect diagnostics; no traffic was changed.
+
+    - name: Derive active and standby sites from actual HAProxy runtime state
+      ansible.builtin.set_fact:
+        demo_status_active_dc: "{{ 'dc1' if demo_status_up[0] == 'dc1_app_01' else 'dc2' }}"
+        demo_status_standby_dc: "{{ 'dc2' if demo_status_up[0] == 'dc1_app_01' else 'dc1' }}"
+
+    - name: Validate active service through the existing synthetic read-only role
+      ansible.builtin.include_role:
+        name: synthetic_validation
+      vars:
+        synthetic_validation_active_dc: "{{ demo_status_active_dc }}"
+        synthetic_validation_inactive_dc: "{{ demo_status_standby_dc }}"
+
+    - name: Inspect both standby node identities without changing them
+      ansible.builtin.include_role:
+        name: application_health
+      vars:
+        application_health_dc: "{{ demo_status_standby_dc }}"
+        application_health_nodes: "{{ runtime_sites[demo_status_standby_dc] }}"
+        application_health_required: false
+
+    - name: Record standby health and inspect only operation-marker existence
+      ansible.builtin.stat:
+        path: /run/ww-demo-failover.lock
+      register: demo_status_marker
+
+    - name: Render concise readiness and require clean presentation baseline
+      ansible.builtin.include_tasks: status/summary.yml

@@ -1,0 +1,24 @@
+---
+- name: Classify readiness without hiding quarantine, active execution or unhealthy standby
+  ansible.builtin.set_fact:
+    demo_status_ready: >-
+      {{ application_health_healthy | length == 2 and
+         not demo_status_marker.stat.exists and
+         demo_status_active_jobs | int == 0 and
+         not terraform_workspace_workspaces.shared.locked and
+         not terraform_workspace_workspaces.dc1.locked and
+         not terraform_workspace_workspaces.dc2.locked }}
+
+- name: Write the local presenter report without credentials
+  ansible.builtin.template:
+    src: report.txt.j2
+    dest: "{{ lookup('ansible.builtin.env', 'DEMO_STATUS_REPORT_FILE') }}"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Require clean readiness before declaring the presentation baseline ready
+  ansible.builtin.assert:
+    that:
+      - demo_status_ready | bool
+    fail_msg: NOT READY - inspect the summary and retained diagnostics. Never clear guards or unlock merely to obtain a green status.

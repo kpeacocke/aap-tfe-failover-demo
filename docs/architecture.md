@@ -1,4 +1,4 @@
-# Demo architecture (Phases 1-4)
+# Demo architecture
 
 ## Responsibility boundaries
 
@@ -64,9 +64,9 @@ identity in a presenter-friendly page.
 The RHDP catalog environment supplies AAP 2.7 and the OpenShift cluster. This
 implementation never installs or upgrades them; Phase 4 adds only demo-owned
 AAP content and a namespaced execution-image build. Self-Service
-Automation Portal is an add-on: a later phase will detect and reuse an existing
-Portal deployment, or deploy Portal onto the supplied OpenShift cluster if
-missing. Portal configuration remains outside Phase 4.
+Automation Portal is a project-managed add-on: Phase 5 detects/reconciles it or
+deploys it onto the supplied OpenShift cluster when missing, using the verified
+supported chart. No separate RHEL Portal appliance is created.
 
 ## AAP workflow execution
 
@@ -115,7 +115,7 @@ workspace is never locked. Rollback does not clear quarantine.
 An explicit administrative release uses normal unlock only, with the original
 reference. It requires both recovered nodes healthy, the recovered site in
 maintenance, and a validated active service at the other site. It does not
-switch traffic or implement the later recovery workflow. A shared HAProxy-side
+switch traffic or replace the separate staged AAP recovery workflow. A shared HAProxy-side
 marker serializes runtime and administrative CLI operations, but cannot
 serialize outside Terraform administrators; concurrent manual lock changes or
 infrastructure mutations must be avoided.
@@ -123,9 +123,24 @@ infrastructure mutations must be avoided.
 ## Current limitations
 
 - HAProxy runtime state resets to DC1 on restart or replacement.
-- Portal templates/deployment and full end-to-end bootstrap/teardown remain
-  later phases. Phase 4 is live-validated; Portal is Phase 5.
+- Staged workflows, Portal and guarded bootstrap reconciliation are
+  live-validated. Actual destructive teardown/recreation is not live-verified.
 - The Phase 1 manual switch helper bypasses Phase 3 quarantine; use the Ansible
   CLI for integrated operations and do not run both concurrently.
 - Enterprise endpoint compatibility is fixture-tested; live acceptance uses
   HCP Terraform Free.
+
+## Presenter readiness
+
+Phase 8 adds a read-only presenter snapshot, not another orchestration layer.
+It reuses Terraform-output discovery and the existing application health,
+HAProxy statistics and synthetic-validation roles. It discovers either active
+site, verifies both serving nodes, validates healthy isolated standby and
+checks HCP locks, AAP active jobs, Portal HTTPS/anonymous denial and marker
+absence. It writes only private local reports/temporary inventory and reads
+remote endpoints/statistics. No remote job, traffic or guard mutation occurs.
+
+The snapshot does not authenticate a browser user or reserve the environment.
+OAuth/SPA rendering remains covered by actual Playwright tests. Presenter
+directions, same-reference standby recovery, optional administrator outage and
+interruption handling are documented in [the runbook](demo-runbook.md).

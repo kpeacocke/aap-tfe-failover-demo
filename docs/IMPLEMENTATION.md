@@ -2207,6 +2207,54 @@ Phase 7 live acceptance is complete:
 
 Demo polish.
 
+Approved scope is presenter readiness, not an application redesign or another
+platform/lifecycle layer:
+
+- Provide `docs/demo-runbook.md` as the canonical portable presenter script:
+  fresh links, separate restricted/admin identities, timing, either active-site
+  direction, planned maintenance, separately approved DC1 failure simulation,
+  original-reference recovery, optional reset and honest prior evidence.
+- Add `bash scripts/demo-status.sh [--details]`: concise read-only readiness
+  and current links, with private detailed output under ignored `.local/status`.
+  Reuse existing Terraform discovery, HAProxy statistics, application health
+  and synthetic-validation roles rather than duplicate API/topology logic.
+- Require actual active two-node traffic/page, healthy isolated standby,
+  unlocked workspaces, no active AAP jobs and no operation marker for READY.
+  Check AAP 2.7 authentication and Portal HTTPS/anonymous catalog denial.
+  Neither READY nor HTTP probes are claimed to verify browser OAuth or reserve
+  the environment; existing actual Portal browser tests remain separate.
+- Nonzero exit on missing prerequisites, API/SSH/health errors or blocked
+  baseline. Preserve diagnostic logs and never auto-clean markers, unlock,
+  launch workflows, change power/traffic or install/upgrade remote platforms.
+- Retain the historical local presenter sheet untouched; it is not the portable
+  source of current lab state. Correct stale README/architecture phase claims.
+- Validate both active-site report directions and blocked health/locks/jobs/
+  marker cases through actual production summary tasks, plus wrapper failure/
+  output handling in credential-free CI. Validate actual lab readiness and
+  real Portal browser access read-only, preserving healthy DC2-active state.
+- Completion does not claim destructive Phase 6 teardown/recreation was tested
+  or that the intermittent RHDP execution-worker failure cause was repaired.
+
+Phase 8 validation:
+
+- Actual production report/classification tests pass for DC1-active and
+  DC2-active baselines. All six blocked cases (marker, active execution,
+  unhealthy standby and each workspace lock) fail readiness and retain the
+  explanatory report. Wrapper tests verify concise default output, optional
+  details, error-code propagation, missing-report refusal and invalid flags.
+- Real read-only status exits 0 / READY on the supplied lab: DC2 active through
+  both nodes, DC1 healthy isolated standby, all workspaces unlocked, no active
+  jobs/marker, authenticated AAP 2.7 and verified Portal HTTPS/auth boundary.
+- Four actual Portal read-only browser tests pass, including restricted login,
+  persisted catalog and denied anonymous/invalid/admin actions. No operation
+  is submitted and no traffic, power state, locks or markers are changed.
+- Production-profile Ansible/YAML lint, ShellCheck, existing CLI regressions,
+  four application tests and all three Terraform validations pass.
+- The historical local run sheet is left untouched and uncommitted; the new
+  portable runbook is canonical. There are no further numbered implementation
+  phases. Destructive lifecycle testing remains a separately authorized
+  outstanding acceptance boundary, not a completed test.
+
 Do not start the next phase until the previous phase works.
 
 ---

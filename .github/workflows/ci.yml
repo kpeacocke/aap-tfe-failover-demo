@@ -83,6 +83,8 @@ jobs:
         run: bash tests/test-lifecycle.sh
       - name: Test administrator failure-simulation guards without AWS credentials
         run: bash tests/test-demo-simulation.sh
+      - name: Test read-only presenter readiness and concise reports
+        run: bash tests/test-demo-status.sh
       - name: Lint Ansible runtime automation
         run: |
           export ANSIBLE_COLLECTIONS_PATH="$PWD/.local/aap-collections:$HOME/.ansible/collections"
@@ -90,8 +92,8 @@ jobs:
           yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap playbooks roles tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
           ansible-lint bootstrap/portal/check.yml bootstrap/portal/deploy.yml bootstrap/portal/verify.yml playbooks/aap/portal-launch.yml tests/portal
           yamllint -d '{extends: default, rules: {line-length: disable}}' portal tests/portal
-          ansible-lint bootstrap/bootstrap.yml bootstrap/teardown.yml bootstrap/lifecycle-platform.yml bootstrap/lifecycle-cleanup.yml bootstrap/lifecycle tests/lifecycle profiles playbooks/demo tests/demo
-          yamllint -d '{extends: default, rules: {line-length: disable}}' profiles tests/lifecycle tests/demo
+          ansible-lint bootstrap/bootstrap.yml bootstrap/teardown.yml bootstrap/lifecycle-platform.yml bootstrap/lifecycle-cleanup.yml bootstrap/lifecycle tests/lifecycle profiles playbooks/demo tests/demo bootstrap/demo-status.yml bootstrap/status tests/status
+          yamllint -d '{extends: default, rules: {line-length: disable}}' profiles tests/lifecycle tests/demo tests/status
       - name: Test Terraform API integration without cloud credentials
         run: bash tests/test-terraform-api.sh
       - name: Test runtime failover and failure handling without cloud credentials

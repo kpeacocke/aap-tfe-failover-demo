@@ -1,0 +1,20 @@
+---
+- name: Verify a blocked baseline fails without hiding its report
+  block:
+    - name: Render the production report with a blocked fixture
+      ansible.builtin.include_tasks:
+        file: ../../bootstrap/status/summary.yml
+        apply:
+          vars: "{{ status_case.overrides }}"
+
+    - name: Fail if the blocked baseline was accepted
+      ansible.builtin.fail:
+        msg: "TEST FAILURE - accepted {{ status_case.name }}."
+  rescue:
+    - name: Require the production readiness assertion and retained diagnostic summary
+      ansible.builtin.assert:
+        that:
+          - ansible_failed_task.name == 'Require clean readiness before declaring the presentation baseline ready'
+          - not demo_status_ready
+          - "'NOT READY - read-only snapshot' in lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'DEMO_STATUS_REPORT_FILE'))"
+          - status_case.expected in lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'DEMO_STATUS_REPORT_FILE'))

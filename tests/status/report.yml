@@ -1,0 +1,85 @@
+---
+- name: Execute actual presenter readiness classification and rendering without lab credentials
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    demo_status_active_dc: dc2
+    demo_status_standby_dc: dc1
+    runtime_frontdoor_url: http://192.0.2.10
+    demo_status_portal_url: https://portal.example.test
+    demo_status_aap_url: https://aap.example.test
+    demo_status_organization: fixture-org
+    application_health_healthy: [dc1-app-01, dc1-app-02]
+    demo_status_marker: {stat: {exists: false}}
+    demo_status_active_jobs: 0
+    terraform_workspace_workspaces:
+      shared: {locked: false}
+      dc1: {locked: false}
+      dc2: {locked: false}
+    status_cases:
+      - name: marker
+        overrides: {demo_status_marker: {stat: {exists: true}}}
+        expected: "Operation marker: PRESENT"
+      - name: active-job
+        overrides: {demo_status_active_jobs: 1}
+        expected: "Active AAP jobs: 1"
+      - name: unhealthy-standby
+        overrides: {application_health_healthy: [dc1-app-01]}
+        expected: "Standby: DC1 (1/2 healthy"
+      - name: source-quarantine
+        overrides:
+          terraform_workspace_workspaces:
+            shared: {locked: false}
+            dc1: {locked: true}
+            dc2: {locked: false}
+        expected: "Workspace ww-demo-dc1: LOCKED"
+      - name: shared-lock
+        overrides:
+          terraform_workspace_workspaces:
+            shared: {locked: true}
+            dc1: {locked: false}
+            dc2: {locked: false}
+        expected: "Workspace ww-demo-shared: LOCKED"
+      - name: active-site-lock
+        overrides:
+          terraform_workspace_workspaces:
+            shared: {locked: false}
+            dc1: {locked: false}
+            dc2: {locked: true}
+        expected: "Workspace ww-demo-dc2: LOCKED"
+  tasks:
+    - name: Render actual healthy DC2 presenter report and require readiness
+      ansible.builtin.include_tasks: ../../bootstrap/status/summary.yml
+
+    - name: Read the actual rendered report
+      ansible.builtin.set_fact:
+        status_test_report: "{{ lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'DEMO_STATUS_REPORT_FILE')) }}"
+
+    - name: Require measured identity and portable links without claiming browser acceptance
+      ansible.builtin.assert:
+        that:
+          - status_test_report is search('READY - read-only snapshot')
+          - "'Active service: DC2' in status_test_report"
+          - "'Next planned target: dc1; recover dc2' in status_test_report"
+          - "'https://portal.example.test/self-service/catalog' in status_test_report"
+          - "'https://app.terraform.io/app/fixture-org/workspaces/ww-demo-dc2' in status_test_report"
+          - "'OAuth/browser UX not checked here' in status_test_report"
+
+    - name: Require DC1 to work without a DC2 baseline assumption
+      ansible.builtin.include_tasks: ../../bootstrap/status/summary.yml
+      vars:
+        demo_status_active_dc: dc1
+        demo_status_standby_dc: dc2
+        application_health_healthy: [dc2-app-01, dc2-app-02]
+
+    - name: Require reversed target and recovery guidance
+      ansible.builtin.assert:
+        that:
+          - "'Next planned target: dc2; recover dc1' in lookup('ansible.builtin.file', lookup('ansible.builtin.env', 'DEMO_STATUS_REPORT_FILE'))"
+
+    - name: Execute blocked-baseline cases against actual production summary tasks
+      ansible.builtin.include_tasks: blocked.yml
+      loop: "{{ status_cases }}"
+      loop_control:
+        loop_var: status_case

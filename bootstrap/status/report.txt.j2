@@ -1,0 +1,30 @@
+DATACENTRE FAILOVER DEMO
+{{ 'READY' if demo_status_ready else 'NOT READY' }} - read-only snapshot, not a reservation or authorization
+
+PASS  Active service: {{ demo_status_active_dc | upper }} (both nodes, HTTP health and page)
+{{ 'PASS' if application_health_healthy | length == 2 else 'FAIL' }}  Standby: {{ demo_status_standby_dc | upper }} ({{ application_health_healthy | length }}/2 healthy; isolated from traffic)
+{% for site in ['shared', 'dc1', 'dc2'] %}
+{{ 'BLOCKED' if terraform_workspace_workspaces[site].locked else 'PASS' }}  Workspace ww-demo-{{ site }}: {{ 'LOCKED - inspect original incident in HCP/AAP' if terraform_workspace_workspaces[site].locked else 'UNLOCKED' }}
+{% endfor %}
+{{ 'BLOCKED' if demo_status_marker.stat.exists else 'PASS' }}  Operation marker: {{ 'PRESENT - inspect owner before retrying' if demo_status_marker.stat.exists else 'ABSENT' }}
+{{ 'BLOCKED' if demo_status_active_jobs | int > 0 else 'PASS' }}  Active AAP jobs: {{ demo_status_active_jobs }}
+PASS  AAP 2.7 gateway authentication
+PASS  Portal HTTPS entrypoint and anonymous catalog denial (OAuth/browser UX not checked here)
+
+Application: {{ runtime_frontdoor_url }}/
+Portal: {{ demo_status_portal_url }}/self-service/catalog
+Failover: {{ demo_status_portal_url }}/self-service/create/templates/default/ww-demo-failover-custom
+Recovery: {{ demo_status_portal_url }}/self-service/create/templates/default/ww-demo-recovery-custom
+AAP: {{ demo_status_aap_url }}/
+{% for site in ['shared', 'dc1', 'dc2'] %}
+Terraform {{ site }}: https://app.terraform.io/app/{{ demo_status_organization }}/workspaces/ww-demo-{{ site }}
+{% endfor %}
+
+{% if demo_status_ready %}
+Next planned target: {{ demo_status_standby_dc }}; recover {{ demo_status_active_dc }} with the SAME reference afterward.
+{% else %}
+Do not launch another operation: resolve failed readiness checks and inspect original incident ownership first.
+{% endif %}
+DC2 active is healthy and intentional; do not switch back just to match old notes.
+Failure simulation stops DC1 only and requires a clean DC1-active baseline.
+No jobs launched, locks changed, markers removed or traffic switched.

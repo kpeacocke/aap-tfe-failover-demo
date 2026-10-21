@@ -14,6 +14,7 @@ case "${1:-}" in
     install) playbook=install-demo.yml ;;
     setup) playbook=setup-demo.yml ;;
     readiness) playbook=check-runtime.yml ;;
+    status) playbook=demo-status.yml ;;
     portal-check) playbook=portal/check.yml ;;
     portal-install) playbook=portal/deploy.yml ;;
     portal-verify) playbook=portal/verify.yml ;;
@@ -45,7 +46,7 @@ case "${1:-}" in
         request_vars=(-e "demo_launch_operation=$1" -e "demo_launch_dc=$2"
             -e "demo_launch_reference=$3" -e "demo_launch_mode=$mode")
         ;;
-    *) echo "Usage: bash scripts/aap-configure.sh <check|inspect|inspect-openshift|build-ee|install|setup|readiness|failover|recovery|portal-check|portal-install|portal-verify|simulate-dc1|restore-dc1>" >&2; exit 2 ;;
+    *) echo "Usage: bash scripts/aap-configure.sh <check|inspect|inspect-openshift|build-ee|install|setup|readiness|status|failover|recovery|portal-check|portal-install|portal-verify|simulate-dc1|restore-dc1>" >&2; exit 2 ;;
 esac
 if [[ "$playbook" != run-workflow.yml && "$#" -ne 1 ]]; then
     echo "This wrapper does not accept arbitrary Ansible arguments." >&2
@@ -77,20 +78,29 @@ for name in AAP_HOSTNAME AAP_USERNAME AAP_PASSWORD AAP_TOKEN AAP_VALIDATE_CERTS 
     OPENSHIFT_API_URL OPENSHIFT_TOKEN OPENSHIFT_VALIDATE_CERTS AAP_OPENSHIFT_NAMESPACE DEMO_PORTAL_REUSE_CLUSTER_REGISTRY_AUTH \
     DEMO_EE_IMAGE DEMO_EE_SOURCE_REVISION DEMO_SCM_REVISION DEMO_OPERATOR_PASSWORD TFE_ADDRESS TFE_TOKEN TF_TOKEN_app_terraform_io \
     HCP_TERRAFORM_ORGANIZATION AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
-    TF_VAR_aws_region TF_VAR_aws_account_id HAPROXY_PUBLIC_IP DEMO_LIVE_FAILURE_SMOKE; do
+    TF_VAR_aws_region TF_VAR_aws_account_id HAPROXY_PUBLIC_IP DEMO_LIVE_FAILURE_SMOKE \
+    DEMO_PORTAL_URL TF_VAR_application_version; do
     if printenv "$name" >/dev/null 2>&1; then args+=(-e "$name"); fi
 done
 if [[ -n "${OPENSHIFT_CA_CERT:-}" ]]; then
     args+=(--mount "type=bind,src=$OPENSHIFT_CA_CERT,dst=/run/demo-cluster-ca,readonly"
         -e OPENSHIFT_CA_CERT=/run/demo-cluster-ca)
 fi
-if [[ "$playbook" =~ ^(install-demo|lifecycle-platform).yml$ ]]; then
+if [[ "$playbook" =~ ^(install-demo|lifecycle-platform|demo-status).yml$ ]]; then
     key=${SSH_PRIVATE_KEY_PATH:-.local/ssh/ww-demo}
     if [[ "$key" != /* ]]; then key="$repo_root/$key"; fi
     known_hosts=${SSH_KNOWN_HOSTS_PATH:-"$HOME/.ssh/known_hosts"}
     if [[ ! -r "$key" || ! -r "$known_hosts" ]]; then
-        echo "Install requires the existing demo SSH key and verified SSH known_hosts file." >&2
+        echo "This operation requires the existing demo SSH key and verified SSH known_hosts file." >&2
         exit 1
+    fi
+    if [[ "$playbook" == demo-status.yml ]]; then
+        if [[ -z "${DEMO_STATUS_DIRECTORY:-}" || ! -d "$DEMO_STATUS_DIRECTORY" ]]; then
+            echo "Use bash scripts/demo-status.sh to allocate a private status report directory." >&2
+            exit 2
+        fi
+        args+=(--mount "type=bind,src=$DEMO_STATUS_DIRECTORY,dst=/run/demo-status"
+            -e DEMO_STATUS_REPORT_FILE=/run/demo-status/report.txt)
     fi
     args+=(--mount "type=bind,src=$key,dst=/run/demo-key,readonly"
         --mount "type=bind,src=$known_hosts,dst=/run/demo-known-hosts,readonly"

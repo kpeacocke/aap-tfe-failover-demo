@@ -1,17 +1,44 @@
 # AAP Self-Service Datacentre Failover Demo
 
 This repository demonstrates a small AWS application spanning two datacentres,
-fronted by HAProxy. The implementation is being delivered in phases; the
-completed phases provision the infrastructure and demonstrate both a manual
-traffic switch and a validated Ansible CLI failover with Terraform workspace
-quarantine.
+fronted by HAProxy. It includes Terraform provisioning, staged AAP 2.7
+failover/recovery, a restricted Self-Service Automation Portal, guarded
+lifecycle automation and automated validation. The live failure/recovery
+acceptance is complete; destructive teardown/recreation remains unverified.
 
 The application is branded "Datacentre Failover Demo" for use with any customer.
 AWS demo tags use `Datacentre-Failover`. Existing `ww-demo-*` identifiers and
 internal paths are retained for deployment/state compatibility; changing them
 is not required to present the generic application.
 
-## Phase 1 architecture
+## Present the demo
+
+Start with the portable [presenter runbook](docs/demo-runbook.md), not a previous
+lab's saved URLs or starting-site assumption. Get current links and a concise
+read-only readiness snapshot:
+
+```bash
+# Set DEMO_PORTAL_URL to your verified HTTPS Portal base URL in private .env.
+bash scripts/demo-status.sh
+```
+
+Requires the existing configured lab, Docker, API credentials and verified SSH
+trust. It discovers the front door through HCP outputs rather than trusting a
+stale `.env` IP. Exit 0 / READY means both sites are healthy, actual active traffic
+and standby isolation passed, workspaces are unlocked, no operation marker or
+active AAP jobs remain, and Portal HTTPS/anonymous denial checks passed. Actual
+OAuth/browser login is a separate check described in the runbook.
+
+Normal output contains status and links only. `--details` shows diagnostic
+Ansible output; per-run reports/logs remain private under ignored `.local/status/`.
+Errors or blocked baselines return nonzero; nothing is auto-unlocked, restarted,
+cleaned up or switched. This is not an exclusive-operation reservation.
+
+Both DC1-active and DC2-active baselines are supported. Last live acceptance
+finished healthy on **DC2**, with DC1 standby. Do not reset solely to match old
+presentation notes.
+
+## Architecture
 
 - `ww-demo-shared` owns the VPC, internet gateway, HAProxy host, and public
   address.
@@ -26,6 +53,20 @@ is not required to present the generic application.
 
 See [docs/architecture.md](docs/architecture.md) for the network and
 workspace details.
+
+```mermaid
+flowchart LR
+  User[Restricted operator] --> Portal[Self-Service Automation Portal]
+  subgraph RHDP[Existing RHDP OpenShift / AAP 2.7]
+    Portal --> AAP[Staged AAP failover / recovery]
+  end
+  AAP -->|Validate, quarantine, release| HCP[HCP Terraform workspaces]
+  HCP -->|Infrastructure lifecycle| AWS[AWS network and EC2]
+  AAP -->|Operational traffic change| HA[HAProxy]
+  Browser[Application browser] --> HA
+  HA --> DC1[DC1: two application nodes]
+  HA --> DC2[DC2: two application nodes]
+```
 
 ## Prerequisites
 
@@ -42,9 +83,10 @@ workspace details.
 - OpenSSH `ssh-keygen` to generate a dedicated demo key, and the presenter's public IPv4
   CIDR for restricted SSH access to HAProxy.
 
-This phase does not configure AAP or Self-Service Automation Portal. In the
-RHDP environment, AAP 2.7 and OpenShift are supplied; Portal will be deployed
-onto that existing OpenShift cluster in a later phase if it is absent.
+These are the infrastructure prerequisites. Subsequent sections cover existing
+AAP authentication, execution-image setup, Portal and lifecycle tooling. RHDP
+supplies AAP 2.7 and OpenShift; this repository never installs or upgrades them.
+The project deploys/reconciles Portal onto that existing OpenShift cluster.
 
 ## Using your own lab
 
@@ -747,8 +789,8 @@ normal infrastructure-changing plan merely to finish a smoke test.
 The Phase 6 destructive lifecycle remains **unverified** and was not authorized.
 GitHub `demo-live` environment configuration remains an operator prerequisite;
 the real acceptance ran the committed smoke locally, not via Actions dispatch.
-Do not treat mocked helper tests as live failure acceptance. Phase 8 has not
-started.
+Do not treat mocked helper tests as live failure acceptance. Phase 8 presenter
+readiness and the portable runbook are described at the top of this README.
 
 ## Validate locally
 
@@ -771,6 +813,7 @@ bash tests/test-runtime.sh
 bash tests/test-terraform-api.sh
 bash tests/test-aap-config.sh
 bash tests/test-portal-config.sh
+bash tests/test-demo-status.sh
 ```
 
 The runtime fixture uses real HAProxy and four copies of the demo application.
