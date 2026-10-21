@@ -33,7 +33,7 @@ grep -Fq 'failed before producing a complete report' "$fixture/output"
 rc=0
 bash "$fixture/scripts/demo-status.sh" --unsafe > "$fixture/output" 2>&1 || rc=$?
 [[ "$rc" == 2 ]]
-docker run --rm --workdir /runner/project --entrypoint ansible-playbook \
+docker run --rm --user 0 --workdir /runner/project --entrypoint ansible-playbook \
     --mount "type=bind,src=$repo_root/bootstrap,dst=/runner/project/bootstrap,readonly" \
     --mount "type=bind,src=$repo_root/tests/status,dst=/runner/project/tests/status,readonly" \
     --mount "type=bind,src=$repo_root/ansible.cfg,dst=/runner/project/ansible.cfg,readonly" \
