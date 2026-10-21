@@ -498,7 +498,8 @@ A separate read-scoped identity synchronizes only the demo organization.
 The printed readiness URL proves workload/Route health, **not** full acceptance.
 Verify operator OAuth login, exactly the two allowed templates, denied
 administration, and real Portal-launched failover/recovery before declaring
-Phase 5 complete. Phase 6 bootstrap/teardown remains out of scope.
+Phase 5 complete. Lifecycle automation and CI are described in the Phase 6/7
+sections below.
 
 ### Live Portal browser acceptance
 
@@ -626,11 +627,109 @@ teardown/recreation has **not** been run against the lab.
 Those non-destructive checks passed, including repeat credential reuse, all
 three real destroy-plan ownership checks and three restricted-browser tests.
 The existing demo remains healthy on DC1 with all workspaces unlocked.
+That is the Phase 6 acceptance snapshot, not a promise about later presenter
+operations. Inspect actual traffic and quarantine before any new live test.
 
 ```bash
 # Credential-free production-task regression tests:
 bash tests/test-lifecycle.sh
 ```
+
+## Phase 7: automated testing and manual live acceptance
+
+Normal pull requests and pushes run credential-free CI only. Existing real
+collection/API fixtures and real HAProxy failure tests are retained. CI now
+also runs the existing application tests through pinned pytest, tests the
+live-check helper contracts, and starts two real application processes for
+Chromium checks of rendered identity, site navigation, reloads and explicit
+404 handling. These local browser checks do **not** claim Portal or AWS E2E
+coverage.
+
+```bash
+python3 -m pip install -r tests/requirements.txt
+python3 -m pytest tests/test_application.py -v
+npm --prefix tests/portal-browser ci
+(cd tests/portal-browser && npx playwright install chromium)
+npm --prefix tests/portal-browser run test:contracts
+npm --prefix tests/portal-browser run test:local
+# Uses the image built by tests/test-aap-config.sh; no cloud credentials:
+bash tests/test-demo-simulation.sh
+```
+
+The [Manual live acceptance workflow](.github/workflows/live.yml) runs only on
+manual dispatch from `main`, serializes its own runs without cancellation and
+uses the GitHub environment **demo-live**. Configure required environment
+reviewers and restrict that environment to `main` in repository settings before
+storing credentials. This does not serialize outside administrators or Portal
+users: reserve an exclusive maintenance window for failure smoke.
+
+Set these **environment variables** in GitHub:
+
+| Variable | Purpose |
+|---|---|
+| `DEMO_PORTAL_URL` | Verified HTTPS Portal URL |
+| `AAP_HOSTNAME` | Verified HTTPS AAP base URL |
+| `HAPROXY_PUBLIC_IP` | Existing public front door, for failure smoke |
+| `HCP_TERRAFORM_ORGANIZATION` | Existing organization, for failure smoke |
+| `AWS_ACCOUNT_ID`, `AWS_REGION` | Explicit verified account/region, for failure smoke |
+
+Set these **environment secrets**, never repository files:
+
+- `DEMO_OPERATOR_PASSWORD`: restricted `ww-demo-operator` password.
+- Failure smoke only: `TFE_TOKEN`, an administrative read-capable `AAP_TOKEN`
+  (for the conservative all-active-jobs check), `AWS_ACCESS_KEY_ID`,
+  `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` when using temporary keys.
+  AWS permission must include identity/instance inspection, stopping and starting
+  only the two existing demo DC1 instances. No create/terminate permission is
+  needed. HCP must support output reads; quarantine mutations are performed by
+  the existing AAP workflow credential, not this test helper.
+
+The default **read-only** scope checks actual OAuth login, persisted catalog
+content, denied anonymous/invalid authentication and denied administration.
+It also selects the failure reason without submitting a task. It neither
+launches failover nor starts/stops instances.
+
+The **failure-smoke** scope additionally requires the exact confirmation
+`STOP DC1`. It requires initially healthy DC1 and all three workspaces unlocked.
+An administrator must first verify both sites healthy, no retained marker,
+no other running work, current application IP and sufficient lab lifetime.
+The test stops the two verified DC1 EC2 instances, verifies HTTP 503, submits
+the real Portal **Site failure** operation, verifies DC2 traffic and exact
+incident-owned DC1 quarantine, starts DC1, then submits recovery with the
+original reference. The workflow validates recovered standby health before
+release; final assertions require DC2 traffic and three unlocked workspaces.
+It intentionally **ends on DC2**, not DC1. Do not enable the independent
+four-operation switchback suite at the same time.
+
+Administrator-only power-state helpers are also available locally:
+
+```bash
+DEMO_LIVE_FAILURE_SMOKE=true bash scripts/aap-configure.sh simulate-dc1
+DEMO_LIVE_FAILURE_SMOKE=true bash scripts/aap-configure.sh restore-dc1
+# Complete opt-in smoke; changes real traffic and ends on DC2:
+DEMO_LIVE_FAILURE_SMOKE=true bash tests/test-portal-browser.sh failure-smoke.spec.mjs
+```
+
+These helpers use exact Terraform-output IDs, an account pin, exact node names,
+project tags, workspace guards and an all-active-AAP-jobs check before EC2
+stop/start. They are not registered as restricted-user AAP/Portal templates.
+Stopping instances is the documented failure-simulation exception to normal
+Terraform lifecycle ownership: it never creates, replaces or terminates them.
+Restore only starts DC1; it does not switch traffic or release quarantine.
+The checks are not a distributed administrative lock.
+
+**On any smoke failure or cancelled job, inspect EC2, the Portal task/AAP graph,
+marker and quarantine before proceeding.** There is deliberately no automatic
+restart, retry, compensating switch, force-unlock or marker removal. Interrupted
+smoke may leave DC1 stopped or quarantined. Do not rerun the whole suite blindly.
+Authentication state, traces and live screenshots are not uploaded as CI
+artifacts; any local screenshots/results remain ignored.
+
+Phase 7 validation is limited to credential-free tests and explicitly approved
+read-only live checks. The new real failure/restore smoke and the Phase 6
+destructive lifecycle remain **unverified** until separately authorized.
+Do not treat mocked helper tests as live failure acceptance. Phase 8 has not
+started.
 
 ## Validate locally
 

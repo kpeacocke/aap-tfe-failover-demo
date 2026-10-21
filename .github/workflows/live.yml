@@ -1,0 +1,86 @@
+name: Manual live acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Read-only Portal checks or traffic-changing DC1 failure smoke
+        type: choice
+        options:
+          - read-only
+          - failure-smoke
+        default: read-only
+      confirmation:
+        description: For failure-smoke, type STOP DC1; requires healthy DC1 and no other operators/jobs
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-live-acceptance
+  cancel-in-progress: false
+
+jobs:
+  live:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: demo-live
+    timeout-minutes: 150
+    steps:
+      - name: Require explicit traffic-change approval
+        env:
+          SCOPE: ${{ inputs.scope }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [[ "$SCOPE" == failure-smoke && "$CONFIRMATION" != "STOP DC1" ]]; then
+            echo "Failure smoke requires exact STOP DC1 confirmation." >&2
+            exit 2
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/portal-browser/package-lock.json
+      - name: Install locked browser tooling
+        run: |
+          npm ci --prefix tests/portal-browser
+          cd tests/portal-browser
+          npx playwright install --with-deps chromium
+      - name: Run approved live scope without saving authentication state
+        env:
+          SCOPE: ${{ inputs.scope }}
+          DEMO_PORTAL_URL: ${{ vars.DEMO_PORTAL_URL }}
+          AAP_HOSTNAME: ${{ vars.AAP_HOSTNAME }}
+          HAPROXY_PUBLIC_IP: ${{ vars.HAPROXY_PUBLIC_IP }}
+          HCP_TERRAFORM_ORGANIZATION: ${{ vars.HCP_TERRAFORM_ORGANIZATION }}
+          TF_VAR_aws_account_id: ${{ vars.AWS_ACCOUNT_ID }}
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          DEMO_OPERATOR_PASSWORD: ${{ secrets.DEMO_OPERATOR_PASSWORD }}
+          AAP_TOKEN: ${{ secrets.AAP_TOKEN }}
+          TFE_TOKEN: ${{ secrets.TFE_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$DEMO_PORTAL_URL" || -z "$AAP_HOSTNAME" || -z "$DEMO_OPERATOR_PASSWORD" ]]; then
+            echo "Configure demo-live Portal/AAP URLs and restricted-user password." >&2
+            exit 2
+          fi
+          if [[ "$SCOPE" == failure-smoke ]]; then
+            for name in HAPROXY_PUBLIC_IP HCP_TERRAFORM_ORGANIZATION TF_VAR_aws_account_id TF_VAR_aws_region TFE_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AAP_TOKEN; do
+              if [[ -z "$(printenv "$name")" ]]; then
+                echo "Missing required failure-smoke input: $name" >&2
+                exit 2
+              fi
+            done
+            # The existing administrator wrapper requires a trusted local env file.
+            install -m 600 /dev/null .env
+            export DEMO_LIVE_FAILURE_SMOKE=true
+            bash tests/test-portal-browser.sh failure-smoke.spec.mjs
+          else
+            bash tests/test-portal-browser.sh access.spec.mjs catalog.spec.mjs
+          fi

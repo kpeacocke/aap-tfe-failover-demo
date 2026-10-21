@@ -20,3 +20,15 @@ test('operator OAuth login exposes exactly the two persisted custom templates', 
   expect((await persisted.json()).map(entity => entity.metadata.uid).sort())
     .toEqual(entities.map(entity => entity.metadata.uid).sort());
 });
+
+test('failure reason is selectable without submitting an operation', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/self-service/create/templates/default/ww-demo-failover-custom', {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.getByRole('button', { name: /^Reason/ }).click();
+  await page.getByRole('option', { name: 'Site failure', exact: true }).click();
+  await expect(page.getByRole('button', { name: /^Reason/ })).toContainText('Site failure');
+  await page.goto('/self-service/catalog', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('Datacentre Failover', { exact: true })).toBeVisible();
+});

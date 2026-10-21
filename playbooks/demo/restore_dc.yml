@@ -1,0 +1,13 @@
+---
+- name: Start only verified demo DC1 instances with administrator approval
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../../bootstrap/aap-connection-vars.yml
+  tasks:
+    - name: Fix the recovery action without changing traffic or releasing quarantine
+      ansible.builtin.set_fact:
+        demo_simulation_action: started
+    - name: Inspect and restore only existing verified DC1 instances
+      ansible.builtin.include_tasks: instance-operation.yml

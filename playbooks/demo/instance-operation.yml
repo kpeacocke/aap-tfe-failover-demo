@@ -1,0 +1,101 @@
+---
+- name: Require exact administrator opt-in and account pin before any API operation
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.env', 'DEMO_LIVE_FAILURE_SMOKE') == 'true'
+      - lookup('ansible.builtin.env', 'TF_VAR_aws_account_id') is match('^[0-9]{12}$')
+      - lookup('ansible.builtin.env', 'TF_VAR_aws_region') is match('^[a-z]{2}(-[a-z]+)+-[0-9]+$')
+      - demo_simulation_action in ['stopped', 'started']
+    fail_msg: Administrator-only failure simulation requires DEMO_LIVE_FAILURE_SMOKE=true and the explicit verified AWS account/region.
+
+- name: Inspect all active AAP jobs before touching existing instance power state
+  ansible.builtin.uri:
+    url: "{{ aap_hostname }}/api/controller/v2/unified_jobs/?status__in=new,pending,waiting,running&page_size=1"
+    url_username: "{{ aap_username if not aap_token else omit }}"
+    url_password: "{{ aap_password if not aap_token else omit }}"
+    force_basic_auth: "{{ not aap_token }}"
+    headers: "{{ {'Authorization': 'Bearer ' ~ aap_token} if aap_token else {} }}"
+    validate_certs: "{{ aap_validate_certs }}"
+    follow_redirects: none
+    unredirected_headers: [Authorization]
+    timeout: 30
+  register: demo_simulation_jobs
+  no_log: true
+
+- name: Require no active AAP execution before administrator failure simulation
+  ansible.builtin.assert:
+    that:
+      - demo_simulation_jobs.json.count == 0
+    fail_msg: AAP has active jobs. Wait for completion; simulation never cancels jobs or removes markers.
+
+- name: Discover existing infrastructure through the current Terraform output contract
+  ansible.builtin.include_role:
+    name: terraform_workspace
+
+- name: Require exactly two unique DC1 instance IDs and no shared-workspace lock
+  ansible.builtin.assert:
+    that:
+      - terraform_workspace_outputs.dc1.datacentre_name.value == 'dc1'
+      - terraform_workspace_outputs.dc1.application_instance_ids.value | length == 2
+      - terraform_workspace_outputs.dc1.application_instance_ids.value | unique | length == 2
+      - not terraform_workspace_workspaces.shared.locked
+      - not terraform_workspace_workspaces.dc2.locked
+      - demo_simulation_action == 'started' or not terraform_workspace_workspaces.dc1.locked
+    fail_msg: Invalid DC1 topology or unexpected workspace lock. Never bypass quarantine to simulate failure.
+
+- name: Verify the actual administrative AWS identity
+  amazon.aws.aws_caller_info:
+    region: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_region') }}"
+  register: demo_simulation_identity
+  no_log: true
+
+- name: Require credentials for only the pinned AWS account
+  ansible.builtin.assert:
+    that:
+      - demo_simulation_identity.account == lookup('ansible.builtin.env', 'TF_VAR_aws_account_id')
+    fail_msg: AWS account mismatch; no instances were changed.
+
+- name: Inspect only the discovered existing instances
+  amazon.aws.ec2_instance_info:
+    region: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_region') }}"
+    instance_ids: "{{ terraform_workspace_outputs.dc1.application_instance_ids.value }}"
+  register: demo_simulation_instances
+
+- name: Verify exact instance set before any EC2 mutation
+  ansible.builtin.assert:
+    that:
+      - demo_simulation_instances.instances | length == 2
+      - >-
+        demo_simulation_instances.instances | map(attribute='instance_id') | sort ==
+        terraform_workspace_outputs.dc1.application_instance_ids.value | sort
+      - >-
+        demo_simulation_instances.instances | map(attribute='tags.Name') | sort ==
+        ['ww-demo-dc1-app-01', 'ww-demo-dc1-app-02']
+    fail_msg: Discovered EC2 instances do not match the exact demo DC1 identity; no mutation is safe.
+
+- name: Require project tags and supported non-terminated instance states
+  ansible.builtin.assert:
+    that:
+      - item.tags.Project == 'AAP-TFE-Failover-Demo'
+      - item.tags.ManagedBy == 'Terraform'
+      - item.tags.Demo == 'Datacentre-Failover'
+      - item.tags.Datacentre == 'dc1'
+      - item.state.name in ['running', 'stopped']
+    fail_msg: Instance {{ item.instance_id }} is not a stable demo-managed DC1 node.
+  loop: "{{ demo_simulation_instances.instances }}"
+  loop_control:
+    label: "{{ item.instance_id }}"
+
+- name: Change power state only on the two verified existing DC1 instances
+  amazon.aws.ec2_instance:
+    region: "{{ lookup('ansible.builtin.env', 'TF_VAR_aws_region') }}"
+    instance_ids: "{{ terraform_workspace_outputs.dc1.application_instance_ids.value }}"
+    state: "{{ demo_simulation_action }}"
+    wait: true
+    wait_timeout: 600
+
+- name: Explain power-state operation boundaries
+  ansible.builtin.debug:
+    msg: >-
+      Verified DC1 instances {{ demo_simulation_action }}. No resources created or destroyed,
+      no traffic switched and no workspace unlocked. Complete recovery through the original-reference Portal workflow.

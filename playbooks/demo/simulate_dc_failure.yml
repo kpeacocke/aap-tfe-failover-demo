@@ -1,0 +1,13 @@
+---
+- name: Stop only verified demo DC1 instances with administrator approval
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../../bootstrap/aap-connection-vars.yml
+  tasks:
+    - name: Fix the simulation action and require explicit approval
+      ansible.builtin.set_fact:
+        demo_simulation_action: stopped
+    - name: Inspect and operate only existing verified DC1 instances
+      ansible.builtin.include_tasks: instance-operation.yml

@@ -1,0 +1,103 @@
+---
+- name: Execute production simulation safety assertions without any external API calls
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    demo_simulation_action: stopped
+    demo_simulation_jobs: {json: {count: 0}}
+    demo_simulation_identity: {account: "123456789012"}
+    terraform_workspace_workspaces:
+      shared: {locked: false}
+      dc1: {locked: false}
+      dc2: {locked: false}
+    terraform_workspace_outputs:
+      dc1:
+        datacentre_name: {value: dc1}
+        application_instance_ids: {value: [i-0123, i-0456]}
+    demo_simulation_instances:
+      instances:
+        - instance_id: i-0123
+          state: {name: running}
+          tags: {Name: ww-demo-dc1-app-01, Project: AAP-TFE-Failover-Demo, ManagedBy: Terraform, Demo: Datacentre-Failover, Datacentre: dc1}
+        - instance_id: i-0456
+          state: {name: running}
+          tags: {Name: ww-demo-dc1-app-02, Project: AAP-TFE-Failover-Demo, ManagedBy: Terraform, Demo: Datacentre-Failover, Datacentre: dc1}
+    simulation_cases:
+      - {name: foreign-account, overrides: {demo_simulation_identity: {account: "000000000000"}}}
+      - {name: active-jobs, overrides: {demo_simulation_jobs: {json: {count: 1}}}}
+      - name: quarantine
+        overrides:
+          terraform_workspace_workspaces: {shared: {locked: false}, dc1: {locked: true}, dc2: {locked: false}}
+      - name: shared-lock
+        overrides:
+          terraform_workspace_workspaces: {shared: {locked: true}, dc1: {locked: false}, dc2: {locked: false}}
+      - name: wrong-instance
+        overrides:
+          demo_simulation_instances: {instances: [{instance_id: i-foreign}]}
+      - name: foreign-tags
+        overrides:
+          demo_simulation_instances:
+            instances:
+              - instance_id: i-0123
+                state: {name: running}
+                tags: {Name: ww-demo-dc1-app-01, Project: unrelated, ManagedBy: Terraform, Demo: Datacentre-Failover, Datacentre: dc1}
+              - instance_id: i-0456
+                state: {name: running}
+                tags: {Name: ww-demo-dc1-app-02, Project: AAP-TFE-Failover-Demo, ManagedBy: Terraform, Demo: Datacentre-Failover, Datacentre: dc1}
+    simulation_guard_names:
+      - Require exact administrator opt-in and account pin before any API operation
+      - Require no active AAP execution before administrator failure simulation
+      - Require exactly two unique DC1 instance IDs and no shared-workspace lock
+      - Require credentials for only the pinned AWS account
+      - Verify exact instance set before any EC2 mutation
+      - Require project tags and supported non-terminated instance states
+  tasks:
+    - name: Allocate the production assertion fixture
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -simulation-guards.yml
+      register: simulation_fixture
+
+    - name: Exercise positive and negative production safety gates
+      block:
+        - name: Select actual production assertions by exact name without evaluating dotted module keys as attribute paths
+          ansible.builtin.set_fact:
+            simulation_guard_tasks: >-
+              {{ lookup('ansible.builtin.file', '../../playbooks/demo/instance-operation.yml') | from_yaml
+                 | selectattr('name', 'in', simulation_guard_names) | list }}
+
+        - name: Refuse an empty or incomplete fixture rather than reporting false coverage
+          ansible.builtin.assert:
+            that:
+              - simulation_guard_tasks | length == simulation_guard_names | length
+              - simulation_guard_tasks | map(attribute='name') | unique | length == 6
+
+        - name: Write only production assertions without cloud or power-state modules
+          ansible.builtin.copy:
+            dest: "{{ simulation_fixture.path }}"
+            content: "{{ simulation_guard_tasks | to_nice_yaml }}"
+            mode: "0600"
+
+        - name: Require the valid two-node demo topology to pass all production guards
+          ansible.builtin.include_tasks: "{{ simulation_fixture.path }}"
+
+        - name: Refuse each unsafe administrative operation
+          ansible.builtin.include_tasks: rejected.yml
+          loop: "{{ simulation_cases }}"
+          loop_control:
+            loop_var: simulation_case
+
+        - name: Allow restoring existing DC1 quarantine without unlocking it
+          ansible.builtin.include_tasks: "{{ simulation_fixture.path }}"
+          vars:
+            demo_simulation_action: started
+            terraform_workspace_workspaces:
+              shared: {locked: false}
+              dc1: {locked: true}
+              dc2: {locked: false}
+      always:
+        - name: Remove only the allocated test fixture
+          ansible.builtin.file:
+            path: "{{ simulation_fixture.path }}"
+            state: absent

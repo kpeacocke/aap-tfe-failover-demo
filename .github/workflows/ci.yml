@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  application-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tests/portal-browser/package-lock.json
+      - name: Install locked browser tooling
+        run: |
+          npm ci --prefix tests/portal-browser
+          cd tests/portal-browser
+          npx playwright install --with-deps chromium
+      - name: Test actual application pages without cloud credentials
+        run: |
+          npm --prefix tests/portal-browser run test:contracts
+          npm --prefix tests/portal-browser run test:local
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -33,7 +54,9 @@ jobs:
             terraform -chdir="$root" validate
           done
       - name: Test demo application
-        run: python -m unittest discover -s tests -v
+        run: |
+          pip install -r tests/requirements.txt
+          python -m pytest tests/test_application.py -v
       - name: Test Terraform environment configuration
         run: bash tests/test-terraform-env.sh
       - name: Test local SSH key lifecycle
@@ -58,6 +81,8 @@ jobs:
           docker rm "$container"
       - name: Test lifecycle approval, saved-plan and ownership guards
         run: bash tests/test-lifecycle.sh
+      - name: Test administrator failure-simulation guards without AWS credentials
+        run: bash tests/test-demo-simulation.sh
       - name: Lint Ansible runtime automation
         run: |
           export ANSIBLE_COLLECTIONS_PATH="$PWD/.local/aap-collections:$HOME/.ansible/collections"
@@ -65,8 +90,8 @@ jobs:
           yamllint -d '{extends: default, rules: {line-length: disable}}' bootstrap playbooks roles tests/terraform_api/operation.yml tests/runtime/workflow-stage.yml
           ansible-lint bootstrap/portal/check.yml bootstrap/portal/deploy.yml bootstrap/portal/verify.yml playbooks/aap/portal-launch.yml tests/portal
           yamllint -d '{extends: default, rules: {line-length: disable}}' portal tests/portal
-          ansible-lint bootstrap/bootstrap.yml bootstrap/teardown.yml bootstrap/lifecycle-platform.yml bootstrap/lifecycle-cleanup.yml bootstrap/lifecycle tests/lifecycle profiles
-          yamllint -d '{extends: default, rules: {line-length: disable}}' profiles tests/lifecycle
+          ansible-lint bootstrap/bootstrap.yml bootstrap/teardown.yml bootstrap/lifecycle-platform.yml bootstrap/lifecycle-cleanup.yml bootstrap/lifecycle tests/lifecycle profiles playbooks/demo tests/demo
+          yamllint -d '{extends: default, rules: {line-length: disable}}' profiles tests/lifecycle tests/demo
       - name: Test Terraform API integration without cloud credentials
         run: bash tests/test-terraform-api.sh
       - name: Test runtime failover and failure handling without cloud credentials

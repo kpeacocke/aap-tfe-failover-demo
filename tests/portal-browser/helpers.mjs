@@ -41,7 +41,7 @@ export async function signIn(page) {
   };
 }
 
-export async function execute(page, request, operation, datacentre, reference) {
+export async function execute(page, request, operation, datacentre, reference, reason = 'Planned maintenance') {
   const failover = operation === 'failover';
   const template = failover ? 'ww-demo-failover-custom' : 'ww-demo-recovery-custom';
   const step = failover ?
@@ -52,6 +52,10 @@ export async function execute(page, request, operation, datacentre, reference) {
     name: failover ? 'Target datacentre' : 'Recovered datacentre', exact: true,
   }).click();
   await page.getByRole('option', { name: datacentre, exact: true }).click();
+  if (failover && reason !== 'Planned maintenance') {
+    await page.getByRole('button', { name: /^Reason/ }).click();
+    await page.getByRole('option', { name: reason, exact: true }).click();
+  }
   await page.getByRole('textbox', {
     name: failover ? 'Incident/change reference' : 'Original incident/change reference', exact: true,
   }).fill(reference);

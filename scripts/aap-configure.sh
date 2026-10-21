@@ -23,6 +23,17 @@ case "${1:-}" in
         playbook=lifecycle-cleanup.yml
         request_vars=(-e demo_lifecycle_remove=true)
         ;;
+    simulate-dc1|restore-dc1)
+        if [[ "${DEMO_LIVE_FAILURE_SMOKE:-}" != true ]]; then
+            echo "Administrator-only power-state changes require DEMO_LIVE_FAILURE_SMOKE=true." >&2
+            exit 2
+        fi
+        if [[ "$1" == simulate-dc1 ]]; then
+            playbook=../playbooks/demo/simulate_dc_failure.yml
+        else
+            playbook=../playbooks/demo/restore_dc.yml
+        fi
+        ;;
     failover|recovery)
         if [[ "$#" -lt 3 || "$#" -gt 4 || ! "$2" =~ ^dc[12]$ || ! "$3" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
             echo "Usage: bash scripts/aap-configure.sh <failover|recovery> <dc1|dc2> <reference> [planned|failure]" >&2
@@ -34,7 +45,7 @@ case "${1:-}" in
         request_vars=(-e "demo_launch_operation=$1" -e "demo_launch_dc=$2"
             -e "demo_launch_reference=$3" -e "demo_launch_mode=$mode")
         ;;
-    *) echo "Usage: bash scripts/aap-configure.sh <check|inspect|inspect-openshift|build-ee|install|setup|readiness|failover|recovery|portal-check|portal-install|portal-verify>" >&2; exit 2 ;;
+    *) echo "Usage: bash scripts/aap-configure.sh <check|inspect|inspect-openshift|build-ee|install|setup|readiness|failover|recovery|portal-check|portal-install|portal-verify|simulate-dc1|restore-dc1>" >&2; exit 2 ;;
 esac
 if [[ "$playbook" != run-workflow.yml && "$#" -ne 1 ]]; then
     echo "This wrapper does not accept arbitrary Ansible arguments." >&2
@@ -66,7 +77,7 @@ for name in AAP_HOSTNAME AAP_USERNAME AAP_PASSWORD AAP_TOKEN AAP_VALIDATE_CERTS 
     OPENSHIFT_API_URL OPENSHIFT_TOKEN OPENSHIFT_VALIDATE_CERTS AAP_OPENSHIFT_NAMESPACE DEMO_PORTAL_REUSE_CLUSTER_REGISTRY_AUTH \
     DEMO_EE_IMAGE DEMO_EE_SOURCE_REVISION DEMO_SCM_REVISION DEMO_OPERATOR_PASSWORD TFE_ADDRESS TFE_TOKEN TF_TOKEN_app_terraform_io \
     HCP_TERRAFORM_ORGANIZATION AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
-    TF_VAR_aws_region TF_VAR_aws_account_id HAPROXY_PUBLIC_IP; do
+    TF_VAR_aws_region TF_VAR_aws_account_id HAPROXY_PUBLIC_IP DEMO_LIVE_FAILURE_SMOKE; do
     if printenv "$name" >/dev/null 2>&1; then args+=(-e "$name"); fi
 done
 if [[ -n "${OPENSHIFT_CA_CERT:-}" ]]; then

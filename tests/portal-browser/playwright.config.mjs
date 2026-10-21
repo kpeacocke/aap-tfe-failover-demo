@@ -6,10 +6,13 @@ if (!process.env.DEMO_PORTAL_URL) {
 if (new URL(process.env.DEMO_PORTAL_URL).protocol !== 'https:') {
   throw new Error('Live Portal browser tests require HTTPS with certificate verification.');
 }
+if (process.env.DEMO_PORTAL_LIVE_OPERATIONS === 'true' && process.env.DEMO_LIVE_FAILURE_SMOKE === 'true') {
+  throw new Error('Select only one live operation suite; failure smoke ends on DC2, while the four-operation suite requires DC1.');
+}
 
 export default defineConfig({
   testDir: '.',
-  testMatch: '*.spec.mjs',
+  testMatch: ['access.spec.mjs', 'catalog.spec.mjs', 'operations.spec.mjs', 'failure-smoke.spec.mjs'],
   workers: 1,
   retries: 0,
   timeout: 180_000,

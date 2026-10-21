@@ -2101,6 +2101,77 @@ Phase 6 non-destructive validation passed on the supplied lab:
 
 Automated testing and CI.
 
+### Testing strategy
+
+- App type: infrastructure/operational automation, a standard-library HTML
+  application and the existing Portal SPA. Reuse existing unittest/Ansible/API,
+  real HAProxy and Playwright assets; do not rewrite passing journeys.
+- Credential-free integration: retain the TLS HCP/AWS protocol fixtures,
+  production collection modules, production AAP configuration assertions and
+  real Linux HAProxy/application failure fixture. Add production assertion
+  fixtures for administrator-only DC1 power-state simulation, including missing
+  approval, wrong account, active jobs, lock/ownership refusal and safe restore
+  while retaining incident quarantine.
+- Browser tier: pinned Playwright/Chromium against two real local application
+  servers verifies HTML/health identity, site navigation/reload and explicit
+  404 recovery. Real Portal OAuth, catalog persistence and denial tests remain
+  a separate secret-backed live tier; mocks are not E2E acceptance.
+- Critical journeys: authenticated discovery; owned lock/release; healthy
+  failover and failed-target rollback; rendered application identity; restricted
+  Portal access; explicit site-failure/standby-recovery smoke.
+- Primary tooling: Docker for Linux HAProxy/collection fixtures; Python/pytest
+  for application tests; Node/Chromium for local and real Portal browser tests.
+  Docker and Node are independent requirements. Missing Docker blocks Linux
+  integration evidence, not browser tests; missing Chromium blocks browser
+  evidence, not API integration. No mock/HTTP-only substitute is called browser
+  acceptance.
+- Test data: disposable container services and temp fixtures, no lab credentials
+  in ordinary CI. Live smoke uses a unique incident reference and existing
+  configured demo resources. It never creates test infrastructure.
+- Pass criteria: exit 0 for every executed suite; actual two-node traffic
+  identity and exact quarantine ownership at each live smoke boundary.
+  Local HTML tests have no authentication/persistence store; auth and catalog
+  persistence are verified against the actual Portal instead.
+
+### CI and live boundaries
+
+- Existing PR/push lint/fmt/validate and fixtures remain; pytest, local Chromium
+  and live-helper contracts are added without giving PR jobs secrets.
+- Live integration is manual dispatch from `main` only, with a dedicated
+  `demo-live` environment, recommended required reviewers, fixed scopes and
+  non-cancelling concurrency. External administrative changes still require
+  exclusive operator coordination.
+- Default live scope is read-only. Traffic-changing failure smoke separately
+  requires exact `STOP DC1` confirmation plus environment secrets.
+- Add the Section 23 administrator helpers using verified installed
+  `amazon.aws.ec2_instance` stop/start interfaces. EC2 power-state failure is
+  the documented simulation exception; Terraform still owns all resource
+  creation/deletion/replacement. Exact account/output IDs/names/tags and no
+  active AAP jobs are checked before instance power changes. The helpers are
+  not granted to the Portal user.
+- Failure smoke starts on DC1 with clean workspaces, stops DC1, verifies 503,
+  runs Portal Site failure to DC2, verifies quarantine, starts DC1 and runs
+  original-reference standby recovery. It finishes on DC2 with workspaces
+  unlocked. It never silently cleans guards or auto-compensates on failure.
+- New live failure smoke and actual destructive Phase 6 teardown/recreation
+  are explicitly unverified. The user approved read-only live validation only
+  for this phase. Do not start Phase 8 or claim those mutations passed.
+
+Phase 7 safe-scope validation:
+
+- Four existing application cases pass through pytest; four live-helper
+  contract cases and three new local Chromium flows pass.
+- Six unsafe production simulation fixtures are rejected, valid stop/restore
+  topology assertions pass and missing opt-in is rejected before any API call.
+- Existing CLI/configuration, ten HCP API integration tests and real
+  HAProxy/application isolated-stage failure regressions pass without lab
+  credentials.
+- Four actual Portal read-only tests pass, including the unsubmitted failure
+  reason selector. No failover/recovery or EC2 power-state change is executed.
+- Production-profile Ansible lint, YAML, ShellCheck, Terraform formatting and
+  all three Terraform validations pass. Snyk Code is not available in the
+  tool environment and is not claimed verified.
+
 ## Phase 8
 
 Demo polish.
